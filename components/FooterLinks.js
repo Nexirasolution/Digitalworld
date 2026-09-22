@@ -9,8 +9,6 @@ const INK = '#000000';
 const INK_SOFT = 'rgba(0,0,0,0.65)';
 const LINE = 'rgba(0,0,0,0.12)';
 
-// Actual WhatsApp glyph (brand mark) — lucide's MessageCircle is a generic
-// chat bubble, not the real logo, so this is an inline SVG instead.
 function WhatsAppIcon({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -53,12 +51,12 @@ export default function FooterLinks({ categories, quickLinks, whatsapp, instagra
     <div className="sm:col-span-8 grid grid-cols-1 sm:grid-cols-8 gap-0 sm:gap-8">
       {/* Shop links */}
       <div className="sm:col-span-2">
-        <AccordionSection id="shop" title="Shop" openSection={openSection} onToggle={toggle}>
+        <AccordionSection id="shop" title="xxxxxxxx" openSection={openSection} onToggle={toggle}>
           <ul className="space-y-2.5">
             {categories.map((cat) => (
               <li key={cat.slug}>
                 <Link href={`/category/${cat.slug}`} className="text-[13px] transition-colors" style={{ color: INK }}>
-                  <span className="hover:opacity-70 transition-opacity">{cat.name}</span>
+                  <span className="hover:opacity-70 transition-opacity">xxxxxxxx</span>
                 </Link>
               </li>
             ))}
@@ -68,12 +66,12 @@ export default function FooterLinks({ categories, quickLinks, whatsapp, instagra
 
       {/* Quick links */}
       <div className="sm:col-span-3">
-        <AccordionSection id="quicklinks" title="Quick Links" openSection={openSection} onToggle={toggle}>
+        <AccordionSection id="quicklinks" title="xxxxxxxx" openSection={openSection} onToggle={toggle}>
           <ul className="space-y-2.5">
             {quickLinks.map((link) => (
               <li key={link.href}>
                 <Link href={link.href} className="text-[13px] transition-colors" style={{ color: INK }}>
-                  <span className="hover:opacity-70 transition-opacity">{link.label}</span>
+                  <span className="hover:opacity-70 transition-opacity">xxxxxxxx</span>
                 </Link>
               </li>
             ))}
@@ -83,24 +81,24 @@ export default function FooterLinks({ categories, quickLinks, whatsapp, instagra
 
       {/* Connect */}
       <div className="sm:col-span-3">
-        <AccordionSection id="connect" title="Connect" openSection={openSection} onToggle={toggle}>
+        <AccordionSection id="connect" title="xxxxxxxx" openSection={openSection} onToggle={toggle}>
           <div className="flex gap-2 mb-5">
-            <a
-              href={`https://wa.me/${whatsapp}`}
+            
+            <a  href={`https://wa.me/${whatsapp}`}
               target="_blank"
               rel="noreferrer"
-              aria-label="WhatsApp"
+              aria-label="xxxxxxxx"
               className="flex items-center justify-center w-9 h-9 rounded-full transition-opacity hover:opacity-75"
               style={{ background: 'transparent', border: `1px solid ${GOLD}`, color: INK }}
             >
               <WhatsAppIcon size={16} />
             </a>
 
-            <a
-              href={instagram}
+            
+             <a href={instagram}
               target="_blank"
               rel="noreferrer"
-              aria-label="Instagram"
+              aria-label="xxxxxxxx"
               className="flex items-center justify-center w-9 h-9 rounded-full transition-opacity hover:opacity-75"
               style={{ background: 'transparent', border: `1px solid ${GOLD}`, color: INK }}
             >
@@ -110,12 +108,12 @@ export default function FooterLinks({ categories, quickLinks, whatsapp, instagra
 
           <div className="text-xs space-y-3 leading-relaxed" style={{ color: INK_SOFT }}>
             <p>
-              <span className="font-semibold" style={{ color: INK }}>WhatsApp</span><br />
-              +91 93444 30878
+              <span className="font-semibold" style={{ color: INK }}>xxxxxxxx</span><br />
+              xxxxxxxx
             </p>
             <p>
-              <span className="font-semibold" style={{ color: INK }}>Email</span><br />
-              jrfashiontirupur7@gmail.com
+              <span className="font-semibold" style={{ color: INK }}>xxxxxxxx</span><br />
+              xxxxxxxx
             </p>
           </div>
         </AccordionSection>

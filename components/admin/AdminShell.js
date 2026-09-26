@@ -5,10 +5,10 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Package, ListTree, ShoppingCart, Boxes, Image as ImageIcon,
-  Clapperboard, Star, Ticket, Layers, FileBarChart, Settings as SettingsIcon, Menu, X, LogOut
+  Clapperboard, Star, Ticket, Layers, FileBarChart, Settings as SettingsIcon,
+  Menu, X, LogOut, Users
 } from 'lucide-react';
 
-// Design tokens — same black/white/gold system as the rest of the site.
 const INK = '#000000';
 const INK_SOFT = '#6B6B6B';
 const GOLD = '#C9A227';
@@ -16,8 +16,10 @@ const GOLD_WASH = '#F6EFD9';
 const LINE = '#E8E8E8';
 const PAPER = '#FFFFFF';
 
-const NAV = [
+// Superadmin nav — full site control, under /admin/*
+const ADMIN_NAV = [
   { href: '/admin',            label: 'Dashboard',     icon: LayoutDashboard },
+  { href: '/admin/sellers',    label: 'Sellers',       icon: Users },
   { href: '/admin/products',   label: 'Products',      icon: Package },
   { href: '/admin/categories', label: 'Categories',    icon: ListTree },
   { href: '/admin/orders',     label: 'Orders',        icon: ShoppingCart },
@@ -31,19 +33,30 @@ const NAV = [
   { href: '/admin/settings',   label: 'Settings',      icon: SettingsIcon },
 ];
 
-export default function AdminShell({ admin, children }) {
+// Seller nav — scoped to their own business, under /seller/*
+const SELLER_NAV = [
+  { href: '/seller/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/seller/products',  label: 'My Products', icon: Package },
+  { href: '/seller/orders',    label: 'My Orders',   icon: ShoppingCart },
+  { href: '/seller/settings',  label: 'Settings',    icon: SettingsIcon },
+];
+
+export default function AdminShell({ admin, navSet = 'admin', children }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
 
+  const nav = navSet === 'seller' ? SELLER_NAV : ADMIN_NAV;
+  const panelLabel = navSet === 'seller' ? 'Seller Panel' : 'Admin Panel';
+  const homeHref = navSet === 'seller' ? '/seller/dashboard' : '/admin';
+
   async function logout() {
     await fetch('/api/admin/logout', { method: 'POST' });
-    router.push('/admin/login');
+    router.push('/seller/login');
   }
 
   return (
     <div className="min-h-screen flex" style={{ background: PAPER }}>
-      {/* Mobile overlay */}
       {open && (
         <div
           className="fixed inset-0 z-40 lg:hidden"
@@ -52,45 +65,29 @@ export default function AdminShell({ admin, children }) {
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={`fixed lg:static z-50 inset-y-0 left-0 w-64 transform transition-transform lg:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
-        style={{
-          background: PAPER,
-          borderRight: `1px solid ${LINE}`,
-        }}
+        style={{ background: PAPER, borderRight: `1px solid ${LINE}` }}
       >
-        {/* Sidebar header */}
-        <div
-          className="flex items-center justify-between px-5 py-4"
-          style={{ borderBottom: `1px solid ${LINE}` }}
-        >
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${LINE}` }}>
           <div className="flex flex-col leading-tight">
-            <span className="font-medium text-base" style={{ color: INK }}>
+            <Link href={homeHref} className="font-medium text-base" style={{ color: INK }}>
               J
-            </span>
-            <span
-              className="text-[10px] tracking-widest uppercase mt-0.5"
-              style={{ color: INK_SOFT }}
-            >
-              Admin Panel
+            </Link>
+            <span className="text-[10px] tracking-widest uppercase mt-0.5" style={{ color: INK_SOFT }}>
+              {panelLabel}
             </span>
           </div>
-          <button
-            className="lg:hidden"
-            onClick={() => setOpen(false)}
-            style={{ color: INK_SOFT }}
-          >
+          <button className="lg:hidden" onClick={() => setOpen(false)} style={{ color: INK_SOFT }}>
             <X size={20} />
           </button>
         </div>
 
-        {/* Nav links */}
         <nav className="p-3 space-y-0.5 overflow-y-auto h-[calc(100vh-65px)]">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || (href !== '/admin' && pathname.startsWith(href));
+          {nav.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || (href !== homeHref && pathname.startsWith(href));
             return (
               <Link
                 key={href}
@@ -121,10 +118,8 @@ export default function AdminShell({ admin, children }) {
             );
           })}
 
-          {/* Divider */}
           <div className="my-3" style={{ height: '1px', background: LINE }} />
 
-          {/* Logout */}
           <button
             onClick={logout}
             className="flex items-center gap-3 px-3 py-2.5 text-sm font-medium w-full transition-colors"
@@ -143,21 +138,16 @@ export default function AdminShell({ admin, children }) {
         </nav>
       </aside>
 
-      {/* Main content area */}
       <div className="flex-1 min-w-0">
-        {/* Mobile topbar */}
         <header
           className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3"
-          style={{
-            background: PAPER,
-            borderBottom: `1px solid ${LINE}`,
-          }}
+          style={{ background: PAPER, borderBottom: `1px solid ${LINE}` }}
         >
           <button onClick={() => setOpen(true)} style={{ color: INK }}>
             <Menu size={22} />
           </button>
           <span className="font-medium text-base" style={{ color: INK }}>
-            JR Fashion Admin
+            JR Fashion {navSet === 'seller' ? 'Seller' : 'Admin'}
           </span>
         </header>
 

@@ -35,6 +35,17 @@ function normalizeSizeChart(value) {
   return [];
 }
 
+// Uploads one file to /api/upload and returns the image URL.
+// Handles non-JSON error responses (e.g. a 413 HTML page from the host).
+async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+  return data.url;
+}
+
 // Shared input style
 const inputStyle = {
   border: `1px solid ${LINE}`,
@@ -74,34 +85,42 @@ const sectionHeadStyle = {
   marginBottom: '12px',
 };
 
-function ImageSlot({ value, onChange, onRemove, showRemove }) {
+const uploadButtonStyle = (disabled) => ({
+  background: PEACH,
+  color: PAPER,
+  border: 'none',
+  borderRadius: '4px',
+  fontFamily: 'sans-serif',
+  opacity: disabled ? 0.6 : 1,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+});
+
+// Single image slot: thumbnail + visible Upload/Replace button + optional URL box.
+// `compact` hides the URL box (used inside the add-on option rows).
+function ImageSlot({ value, onChange, onRemove, showRemove, compact = false }) {
   const [uploading, setUploading] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef(null);
 
   async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      onChange(data.url);
+      const url = await uploadImage(file);
+      onChange(url);
       toast.success('Image uploaded');
     } catch (err) {
       toast.error(err.message);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   }
 
   return (
-    <div className="flex items-center gap-2 mb-2">
+    <div className={`flex items-center gap-2 mb-2 ${compact ? '' : 'w-full'}`}>
       <div
-        onClick={() => !uploading && fileRef.current?.click()}
-        className="shrink-0 overflow-hidden relative"
+        className="shrink-0 overflow-hidden"
         style={{
           width: '48px',
           height: '48px',
@@ -111,32 +130,44 @@ function ImageSlot({ value, onChange, onRemove, showRemove }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: 'pointer',
         }}
       >
         {value ? (
           <img src={value} alt="" className="w-full h-full object-cover" />
-        ) : uploading ? (
-          <Loader2 size={16} className="animate-spin" style={{ color: INK }} />
         ) : (
           <Upload size={14} style={{ color: PEACH }} />
         )}
-        {uploading && value && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.7)' }}>
-            <Loader2 size={14} className="animate-spin" style={{ color: INK }} />
-          </div>
-        )}
       </div>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
 
       <input
-        placeholder="https://... or click thumbnail to upload"
-        style={{ ...inputStyle, marginTop: 0, flex: 1 }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={(e) => (e.target.style.borderColor = PEACH)}
-        onBlur={(e) => (e.target.style.borderColor = LINE)}
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFile}
       />
+
+      <button
+        type="button"
+        disabled={uploading}
+        onClick={() => fileRef.current?.click()}
+        className="flex items-center gap-1 text-sm font-medium px-3 py-2 shrink-0"
+        style={uploadButtonStyle(uploading)}
+      >
+        {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+        {uploading ? 'Uploading…' : value ? 'Replace' : 'Upload'}
+      </button>
+
+      {!compact && (
+        <input
+          placeholder="or paste image URL"
+          style={{ ...inputStyle, marginTop: 0, flex: 1, minWidth: 0 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={(e) => (e.target.style.borderColor = PEACH)}
+          onBlur={(e) => (e.target.style.borderColor = LINE)}
+        />
+      )}
 
       {showRemove && (
         <button type="button" onClick={onRemove} style={{ color: INK_SOFT, flexShrink: 0 }}>
@@ -183,6 +214,7 @@ function AddonOptionsEditor({ title, options, onAdd, onUpdate, onRemove }) {
           style={{ borderBottom: idx < options.length - 1 ? `1px solid ${LINE}` : 'none' }}
         >
           <ImageSlot
+            compact
             value={opt.image}
             onChange={(url) => onUpdate(idx, 'image', url)}
             onRemove={() => onUpdate(idx, 'image', '')}
@@ -263,7 +295,11 @@ export default function ProductForm({ initial, productId }) {
   });
   const [saving, setSaving] = useState(false);
   const [sizeChartUploading, setSizeChartUploading] = useState(false);
-  const sizeChartFileRef = useRef();
+  const sizeChartFileRef = useRef(null);
+
+  // Per-variant multi-image upload
+  const variantFileRefs = useRef({});
+  const [variantUploading, setVariantUploading] = useState(null);
 
   useEffect(() => {
     fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.categories || []));
@@ -312,6 +348,33 @@ export default function ProductForm({ initial, productId }) {
     });
   }
 
+  // Select several files at once; each URL is added as soon as its upload succeeds.
+  async function handleVariantFiles(vIdx, e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    setVariantUploading(vIdx);
+    let count = 0;
+    try {
+      for (const file of files) {
+        const url = await uploadImage(file);
+        count++;
+        setForm((f) => {
+          const variants = [...f.variants];
+          const existing = variants[vIdx].images.filter(Boolean);
+          variants[vIdx] = { ...variants[vIdx], images: [...existing, url] };
+          return { ...f, variants };
+        });
+      }
+      toast.success(`${count} image${count > 1 ? 's' : ''} uploaded`);
+    } catch (err) {
+      toast.error(count ? `${err.message} (${count} uploaded before the error)` : err.message);
+    } finally {
+      setVariantUploading(null);
+      e.target.value = '';
+    }
+  }
+
   function updateSize(vIdx, sIdx, field, value) {
     setForm((f) => {
       const variants = [...f.variants];
@@ -356,27 +419,23 @@ export default function ProductForm({ initial, productId }) {
     setForm((f) => ({ ...f, [field]: (f[field] || []).filter((_, i) => i !== idx) }));
   }
 
-  // Size chart — supports multiple images. Selecting several files at once
-  // uploads each in turn and appends every resulting URL to the array.
+  // Size chart — supports multiple images. Each URL is added to the form as soon
+  // as its upload succeeds, so a failure part-way doesn't lose earlier uploads.
   async function handleSizeChartFilesChange(e) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
     setSizeChartUploading(true);
+    let count = 0;
     try {
-      const uploaded = [];
       for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Upload failed');
-        uploaded.push(data.url);
+        const url = await uploadImage(file);
+        count++;
+        setForm((f) => ({ ...f, sizeChart: [...(f.sizeChart || []), url] }));
       }
-      setForm((f) => ({ ...f, sizeChart: [...(f.sizeChart || []), ...uploaded] }));
-      toast.success(`${uploaded.length} size chart image${uploaded.length > 1 ? 's' : ''} uploaded`);
+      toast.success(`${count} size chart image${count > 1 ? 's' : ''} uploaded`);
     } catch (err) {
-      toast.error(err.message);
+      toast.error(count ? `${err.message} (${count} uploaded before the error)` : err.message);
     } finally {
       setSizeChartUploading(false);
       e.target.value = '';
@@ -390,51 +449,60 @@ export default function ProductForm({ initial, productId }) {
   async function submit(e) {
     e.preventDefault();
     setSaving(true);
-    // Note: sku is intentionally omitted — it's auto-generated/managed server-side
-    // based on the product's category (see /api/products and /api/products/[id]).
-    const payload = {
-      ...form,
-      sizeChart: form.sizeChart || [],
-      sleeveOptions: form.sleeveOptions || [],
-      zipOptions: form.zipOptions || [],
-      pantOptions: (form.pantOptions || [])
-        .filter((o) => o.name?.trim())
-        .map((o) => ({
-          name: o.name.trim(),
-          image: o.image || '',
-          price: Number(o.price) || 0,
-          stock: Number(o.stock) || 0,
-          sku: o.sku || '',
+    try {
+      // Note: sku is intentionally omitted — it's auto-generated/managed server-side
+      // based on the product's category (see /api/products and /api/products/[id]).
+      const payload = {
+        ...form,
+        sizeChart: form.sizeChart || [],
+        sleeveOptions: form.sleeveOptions || [],
+        zipOptions: form.zipOptions || [],
+        pantOptions: (form.pantOptions || [])
+          .filter((o) => o.name?.trim())
+          .map((o) => ({
+            name: o.name.trim(),
+            image: o.image || '',
+            price: Number(o.price) || 0,
+            stock: Number(o.stock) || 0,
+            sku: o.sku || '',
+          })),
+        shawlOptions: (form.shawlOptions || [])
+          .filter((o) => o.name?.trim())
+          .map((o) => ({
+            name: o.name.trim(),
+            image: o.image || '',
+            price: Number(o.price) || 0,
+            stock: Number(o.stock) || 0,
+            sku: o.sku || '',
+          })),
+        variants: form.variants.map((v) => ({
+          ...v,
+          price: Number(v.price),
+          compareAtPrice: Number(v.compareAtPrice) || 0,
+          images: v.images.filter(Boolean),
+          sizes: v.sizes.map((s) => ({ ...s, stock: Number(s.stock) })),
         })),
-      shawlOptions: (form.shawlOptions || [])
-        .filter((o) => o.name?.trim())
-        .map((o) => ({
-          name: o.name.trim(),
-          image: o.image || '',
-          price: Number(o.price) || 0,
-          stock: Number(o.stock) || 0,
-          sku: o.sku || '',
-        })),
-      variants: form.variants.map((v) => ({
-        ...v,
-        price: Number(v.price),
-        compareAtPrice: Number(v.compareAtPrice) || 0,
-        images: v.images.filter(Boolean),
-        sizes: v.sizes.map((s) => ({ ...s, stock: Number(s.stock) })),
-      })),
-    };
-    delete payload.sku;
+      };
+      delete payload.sku;
 
-    const url = productId ? `/api/products/${productId}` : '/api/products';
-    const method = productId ? 'PUT' : 'POST';
-    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const data = await res.json();
-    setSaving(false);
-    if (res.ok) {
-      toast.success(productId ? 'Product updated' : 'Product created');
-      router.push('/admin/products');
-    } else {
-      toast.error(data.error || 'Something went wrong');
+      const url = productId ? `/api/products/${productId}` : '/api/products';
+      const method = productId ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(productId ? 'Product updated' : 'Product created');
+        router.push('/admin/products');
+      } else {
+        toast.error(data.error || 'Something went wrong');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Something went wrong');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -546,7 +614,14 @@ export default function ProductForm({ initial, productId }) {
                 <span style={{ fontSize: '10px', fontFamily: 'sans-serif' }}>{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
               </button>
             </div>
-            <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
+            <input
+              ref={sizeChartFileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleSizeChartFilesChange}
+            />
           </div>
 
           {/* Sleeve/Zip options — product-level, not per-variant. Admin picks
@@ -705,9 +780,33 @@ export default function ProductForm({ initial, productId }) {
               />
             </div>
 
-            <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', marginBottom: '8px', fontWeight: '500' }}>
-              Images for this colour — click thumbnail to upload
-            </p>
+            {/* Images header + bulk upload */}
+            <div className="flex items-center justify-between mb-2">
+              <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500' }}>
+                Images for this colour
+              </p>
+              <button
+                type="button"
+                disabled={variantUploading === vIdx}
+                onClick={() => variantFileRefs.current[vIdx]?.click()}
+                className="flex items-center gap-1 text-sm font-medium px-3 py-1.5"
+                style={uploadButtonStyle(variantUploading === vIdx)}
+              >
+                {variantUploading === vIdx
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Upload size={14} />}
+                {variantUploading === vIdx ? 'Uploading…' : 'Upload images'}
+              </button>
+              <input
+                ref={(el) => { variantFileRefs.current[vIdx] = el; }}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => handleVariantFiles(vIdx, e)}
+              />
+            </div>
+
             {v.images.map((img, imgIdx) => (
               <ImageSlot
                 key={imgIdx}
@@ -795,6 +894,7 @@ export default function ProductForm({ initial, productId }) {
 
       {/* Submit button */}
       <button
+        type="submit"
         disabled={saving}
         className="w-full sm:w-auto px-8 py-3 font-medium text-sm transition-opacity"
         style={{

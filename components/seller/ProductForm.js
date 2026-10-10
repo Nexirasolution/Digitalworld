@@ -44,7 +44,6 @@ export default function ProductForm({ productId, initialProduct }) {
   const [pantOptions, setPantOptions] = useState([]);
   const [shawlOptions, setShawlOptions] = useState([]);
 
-  // Load category list — flattened with parent context for the <select>.
   useEffect(() => {
     fetch('/api/categories')
       .then((r) => r.json())
@@ -52,7 +51,6 @@ export default function ProductForm({ productId, initialProduct }) {
       .catch(() => {});
   }, []);
 
-  // Populate form from an existing product (edit mode).
   useEffect(() => {
     if (!initialProduct) {
       setLoading(false);
@@ -208,20 +206,25 @@ export default function ProductForm({ productId, initialProduct }) {
     setSaving(true);
     const payload = buildPayload();
 
-    const res = await fetch(isEdit ? `/api/products/${productId}` : '/api/products', {
-      method: isEdit ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    setSaving(false);
+    try {
+      const res = await fetch(isEdit ? `/api/products/${productId}` : '/api/products', {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.error || 'Failed to save product.');
-      return;
+      if (!res.ok) {
+        setError(data.error || 'Failed to save product.');
+        setSaving(false);
+        return;
+      }
+
+      router.push('/seller/products');
+    } catch {
+      setError('Something went wrong. Please try again.');
+      setSaving(false);
     }
-
-    router.push('/seller/products');
   }
 
   if (loading) {
@@ -295,13 +298,11 @@ export default function ProductForm({ productId, initialProduct }) {
           />
         </Field>
 
-        <Field label="Size Chart Images (comma separated URLs, optional)">
-          <input
+        <Field label="Size Chart Images (optional)">
+          <ImageUploader
             value={form.sizeChart}
-            onChange={(e) => updateField('sizeChart', e.target.value)}
-            className="w-full px-3 py-2.5 text-sm outline-none"
-            style={{ border: `1px solid ${LINE}`, color: INK }}
-            placeholder="https://... , https://..."
+            onChange={(val) => updateField('sizeChart', val)}
+            folder="size-charts"
           />
           <p className="text-[11px] mt-1" style={{ color: INK_SOFT }}>
             Leave blank to fall back to the category&apos;s own size chart.
@@ -403,13 +404,11 @@ export default function ProductForm({ productId, initialProduct }) {
               </Field>
             </div>
 
-            <Field label="Images (comma separated URLs)">
-              <input
+            <Field label="Images">
+              <ImageUploader
                 value={v.images}
-                onChange={(e) => updateVariant(vi, 'images', e.target.value)}
-                className="w-full px-3 py-2 text-sm outline-none"
-                style={{ border: `1px solid ${LINE}`, color: INK }}
-                placeholder="https://... , https://..."
+                onChange={(val) => updateVariant(vi, 'images', val)}
+                folder="products"
               />
             </Field>
 
@@ -455,21 +454,17 @@ export default function ProductForm({ productId, initialProduct }) {
         </button>
       </Section>
 
-      {/* Pant add-ons */}
       <AddonSection
         title="Pant Add-ons (optional)"
         items={pantOptions}
-        setter={setPantOptions}
         onUpdate={(i, key, value) => updateAddon(setPantOptions, i, key, value)}
         onAdd={() => addAddon(setPantOptions)}
         onRemove={(i) => removeAddon(setPantOptions, i)}
       />
 
-      {/* Shawl add-ons */}
       <AddonSection
         title="Shawl Add-ons (optional)"
         items={shawlOptions}
-        setter={setShawlOptions}
         onUpdate={(i, key, value) => updateAddon(setShawlOptions, i, key, value)}
         onAdd={() => addAddon(setShawlOptions)}
         onRemove={(i) => removeAddon(setShawlOptions, i)}
@@ -486,6 +481,103 @@ export default function ProductForm({ productId, initialProduct }) {
     </form>
   );
 }
+
+/* ---------- Image uploader ---------- */
+
+// `value` is a comma-separated string of URLs; `onChange` receives the same format.
+function ImageUploader({ value, onChange, folder = 'products', multiple = true }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  const urls = (value || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  async function onFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // allow re-selecting the same file
+    if (!files.length) return;
+
+    setUploading(true);
+    setUploadError('');
+    const uploaded = [];
+
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('folder', folder);
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+        uploaded.push(data.url);
+      } catch (err) {
+        setUploadError(`${file.name}: ${err.message}`);
+      }
+    }
+
+    if (uploaded.length) {
+      const next = multiple ? [...urls, ...uploaded] : [uploaded[0]];
+      onChange(next.join(', '));
+    }
+    setUploading(false);
+  }
+
+  function removeAt(i) {
+    onChange(urls.filter((_, idx) => idx !== i).join(', '));
+  }
+
+  return (
+    <div>
+      {urls.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {urls.map((url, i) => (
+            <div key={url + i} className="relative" style={{ width: 80, height: 80, border: `1px solid ${LINE}` }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" className="w-full h-full object-cover" />
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                className="absolute top-0 right-0 w-5 h-5 text-[12px] leading-none"
+                style={{ background: INK, color: PAPER }}
+                aria-label="Remove image"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <label
+        className="inline-block px-3 py-2 text-[12px] tracking-[1px] uppercase cursor-pointer"
+        style={{ border: `1px solid ${INK}`, color: INK, opacity: uploading ? 0.6 : 1 }}
+      >
+        {uploading ? 'Uploading...' : multiple ? 'Upload Images' : 'Upload Image'}
+        <input
+          type="file"
+          accept="image/*"
+          multiple={multiple}
+          onChange={onFiles}
+          disabled={uploading}
+          className="hidden"
+        />
+      </label>
+
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 text-sm outline-none mt-2"
+        style={{ border: `1px solid ${LINE}`, color: INK }}
+        placeholder="or paste image URL(s), comma separated"
+      />
+
+      {uploadError && (
+        <p className="text-[12px] mt-1" style={{ color: RED }}>{uploadError}</p>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Layout helpers ---------- */
 
 function Section({ title, children }) {
   return (
@@ -548,15 +640,15 @@ function AddonSection({ title, items, onUpdate, onAdd, onRemove }) {
               />
             </Field>
           </div>
-          <Field label="Image URL (optional)">
-            <input
+          <Field label="Image (optional)">
+            <ImageUploader
               value={o.image}
-              onChange={(e) => onUpdate(i, 'image', e.target.value)}
-              className="w-full px-3 py-2 text-sm outline-none"
-              style={{ border: `1px solid ${LINE}`, color: INK }}
+              onChange={(val) => onUpdate(i, 'image', val)}
+              folder="addons"
+              multiple={false}
             />
           </Field>
-          <button type="button" onClick={() => onRemove(i)} className="text-[12px] mt-1" style={{ color: '#B3261E' }}>
+          <button type="button" onClick={() => onRemove(i)} className="text-[12px] mt-1" style={{ color: RED }}>
             Remove
           </button>
         </div>

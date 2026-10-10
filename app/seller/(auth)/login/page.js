@@ -15,13 +15,11 @@ export default function SellerLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
-    setNotice('');
     setLoading(true);
 
     try {
@@ -42,17 +40,12 @@ export default function SellerLoginPage() {
 
       if (role === 'superadmin') {
         router.push('/admin/dashboard');
-        return;
+      } else if (status === 'pending') {
+        router.push('/seller/pending');
+      } else {
+        router.push('/seller/dashboard');
       }
-
-      if (status === 'pending') {
-        setNotice('Your account is still pending approval. You can log in, but you cannot add products or manage orders yet.');
-        setLoading(false);
-        return;
-      }
-
-      // approved seller
-      router.push('/seller/dashboard');
+      router.refresh();
     } catch (err) {
       setError('Something went wrong. Please try again.');
       setLoading(false);
@@ -103,11 +96,6 @@ export default function SellerLoginPage() {
           {error && (
             <div className="text-[13px]" style={{ color: '#B3261E' }}>
               {error}
-            </div>
-          )}
-          {notice && (
-            <div className="text-[13px] px-3 py-2.5" style={{ color: INK, background: '#FBF3D9' }}>
-              {notice}
             </div>
           )}
 

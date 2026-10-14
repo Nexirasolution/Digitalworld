@@ -4,6 +4,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { X, UploadCloud, Loader2, Plus, Upload } from 'lucide-react';
+import { getType } from '@/lib/productTypes';
+import ProductTypeFields from '@/components/ProductTypeFields';
+
+const inputCls = 'w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none';
 
 export default function BulkAddProductsPage() {
   const router = useRouter();
@@ -21,23 +25,22 @@ export default function BulkAddProductsPage() {
   // Applies to every product created in this batch
   const [isReadyToShip, setIsReadyToShip] = useState(false);
 
-  // Optional garment attributes — product-level, multi-select. Applied to
-  // every product in this batch. Leave both unchecked for categories where
-  // these don't apply (sarees, dupattas, etc). Customers will pick one of
-  // each on the storefront PDP if any are checked here.
+  // Apparel-only (shown only when the category's product type is apparel)
   const [sleeveOptions, setSleeveOptions] = useState([]);
   const [zipOptions, setZipOptions] = useState([]);
-
-  // Optional — one or more shared size chart images applied to every
-  // product in this batch. Leave empty to fall back to the category's
-  // size chart instead.
   const [sizeChart, setSizeChart] = useState([]);
   const [sizeChartUploading, setSizeChartUploading] = useState(false);
+
+  // NEW: type-specific fields shared by every product in the batch
+  const [attributes, setAttributes] = useState({});
+  const [specs, setSpecs] = useState([]);
 
   // Fallback for categories that have no predefined sizes configured
   const [manualSizeName, setManualSizeName] = useState('');
   const [manualSizeStock, setManualSizeStock] = useState('');
   const [manualSizes, setManualSizes] = useState([]); // [{ size, stock }]
+  // Non-apparel with no category sizes: one "Standard" option, one stock number
+  const [singleStock, setSingleStock] = useState('');
 
   const [files, setFiles] = useState([]); // File[]
   const [previews, setPreviews] = useState([]); // objectURL[]
@@ -51,7 +54,15 @@ export default function BulkAddProductsPage() {
       .catch(() => toast.error('Failed to load categories'));
   }, []);
 
+  function categoryLabel(c) {
+    const parent = c.parent ? categories.find((p) => p._id === String(c.parent)) : null;
+    return parent ? `${parent.name} — ${c.name}` : c.name;
+  }
+
   const selectedCategory = categories.find((c) => c._id === category);
+  const typeKey = selectedCategory ? (selectedCategory.productType || 'apparel') : null;
+  const type = getType(typeKey);
+
   // Preview of what the auto-generated title prefix will look like, purely cosmetic
   const titlePreview = (selectedCategory?.name || '')
     .trim()
@@ -66,7 +77,21 @@ export default function BulkAddProductsPage() {
     setManualSizes([]);
     setManualSizeName('');
     setManualSizeStock('');
+    setSingleStock('');
   }, [category, categories]);
+
+  // Switching to a different product type clears fields that belonged to the old one.
+  useEffect(() => {
+    setAttributes({});
+    setSpecs([]);
+    setFabric('');
+    setSleeveOptions([]);
+    setZipOptions([]);
+    setSizeChart([]);
+  }, [typeKey]);
+
+  // Non-apparel category without configured sizes → single "Standard" option
+  const noSizeMode = !!category && categorySizes.length === 0 && !!type.defaultSize;
 
   function toggleSleeveOption(opt) {
     setSleeveOptions((prev) => (prev.includes(opt) ? prev.filter((o) => o !== opt) : [...prev, opt]));
@@ -110,8 +135,7 @@ export default function BulkAddProductsPage() {
     return data.url;
   }
 
-  // Size chart — supports multiple images. Selecting several files at once
-  // uploads each in turn and appends every resulting URL to the shared array.
+  // Size chart — supports multiple images (apparel only).
   async function handleSizeChartFilesChange(e) {
     const selected = Array.from(e.target.files || []);
     if (selected.length === 0) return;
@@ -146,20 +170,24 @@ export default function BulkAddProductsPage() {
     if (!price || Number(price) <= 0) return toast.error('Enter a valid price');
     if (files.length === 0) return toast.error('Add at least one image');
 
-    // Combine predefined-size stock and manually-added sizes
-    const fromPredefined = Object.entries(stockBySize)
-      .filter(([, stock]) => stock !== '')
-      .map(([size, stock]) => ({ size, stock: Number(stock) }));
+    // Build the size/option list
+    let sizes;
+    if (noSizeMode) {
+      if (singleStock === '') return toast.error('Enter the stock for each product');
+      sizes = [{ size: type.defaultSize, stock: Number(singleStock) || 0 }];
+    } else {
+      const fromPredefined = Object.entries(stockBySize)
+        .filter(([, stock]) => stock !== '')
+        .map(([size, stock]) => ({ size, stock: Number(stock) }));
+      const fromManual = manualSizes.map((s) => ({ size: s.size, stock: Number(s.stock) || 0 }));
+      sizes = [...fromPredefined, ...fromManual];
 
-    const fromManual = manualSizes.map((s) => ({ size: s.size, stock: Number(s.stock) || 0 }));
-
-    const sizes = [...fromPredefined, ...fromManual];
-
-    if (sizes.length === 0) {
-      if (categorySizes.length === 0) {
-        return toast.error('This category has no sizes configured — add a size manually below, or set sizes on the category first.');
+      if (sizes.length === 0) {
+        if (categorySizes.length === 0) {
+          return toast.error('This category has no sizes configured — add a size manually below, or set sizes on the category first.');
+        }
+        return toast.error('Enter stock for at least one size');
       }
-      return toast.error('Enter stock for at least one size');
     }
 
     setSubmitting(true);
@@ -171,7 +199,7 @@ export default function BulkAddProductsPage() {
         imageUrls.push(url);
       }
 
-      // 2. Create products in bulk
+      // 2. Create products in bulk (the server strips fields that don't fit the type)
       const res = await fetch('/api/products/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -188,6 +216,8 @@ export default function BulkAddProductsPage() {
           sizeChart,
           sleeveOptions,
           zipOptions,
+          attributes,
+          specs,
         }),
       });
 
@@ -218,9 +248,9 @@ export default function BulkAddProductsPage() {
     <div className="max-w-3xl">
       <h1 className="font-display text-2xl font-bold text-brand-magenta mb-1">Bulk Add Products</h1>
       <p className="text-sm text-brand-ink/50 mb-6">
-        One category, description, and fabric applied to every product. Each image you upload becomes
+        One category, description, and price applied to every product. Each image you upload becomes
         its own product — titles are generated automatically from the category, and SKUs from the code below.
-        Pant/Shawl add-on options can be set afterward from each product's own edit page.
+        {type.showAddons && " Pant/Shawl add-on options can be set afterward from each product's own edit page."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -230,17 +260,17 @@ export default function BulkAddProductsPage() {
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+              className={inputCls}
               required
             >
               <option value="">Select category...</option>
               {categories.map((c) => (
-                <option key={c._id} value={c._id}>{c.name}</option>
+                <option key={c._id} value={c._id}>{categoryLabel(c)}</option>
               ))}
             </select>
             {category && (
               <p className="text-xs text-brand-ink/40 mt-1">
-                Titles auto-generate as {titlePreview}001, {titlePreview}002...
+                Product type: {type.label}. Titles auto-generate as {titlePreview}001, {titlePreview}002...
               </p>
             )}
           </div>
@@ -251,7 +281,7 @@ export default function BulkAddProductsPage() {
               value={skuPrefix}
               onChange={(e) => setSkuPrefix(e.target.value)}
               placeholder="e.g. MT"
-              className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+              className={inputCls}
               required
             />
             <p className="text-xs text-brand-ink/40 mt-1">
@@ -263,121 +293,106 @@ export default function BulkAddProductsPage() {
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Price</label>
-            <input
-              type="number"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
-              required
-            />
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className={inputCls} required />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Compare-at price (optional)</label>
-            <input
-              type="number"
-              value={compareAtPrice}
-              onChange={(e) => setCompareAtPrice(e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
-            />
+            <input type="number" value={compareAtPrice} onChange={(e) => setCompareAtPrice(e.target.value)} className={inputCls} />
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
-          />
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className={inputCls} />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Fabric</label>
-          <input
-            value={fabric}
-            onChange={(e) => setFabric(e.target.value)}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
-          />
-        </div>
-
-        {/* Sleeve Type / Zip Type — product-level, multi-select. Applied to
-            every product in this batch. Leave both unchecked for categories
-            where these don't apply (sarees, dupattas, etc). If any are
-            checked, customers must choose one of each on the storefront
-            before adding the product to cart. */}
-        <div className="grid sm:grid-cols-2 gap-4">
+        {category && type.showFabric && (
           <div>
-            <label className="block text-sm font-medium mb-2">Sleeve Type Options (optional)</label>
-            <div className="flex flex-wrap gap-3">
-              {['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'].map((opt) => (
-                <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={sleeveOptions.includes(opt)}
-                    onChange={() => toggleSleeveOption(opt)}
-                    className="w-4 h-4"
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
+            <label className="block text-sm font-medium mb-1">Fabric</label>
+            <input value={fabric} onChange={(e) => setFabric(e.target.value)} className={inputCls} />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Zip Type Options (optional)</label>
-            <div className="flex flex-wrap gap-3">
-              {['With Zip', 'Without Zip'].map((opt) => (
-                <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={zipOptions.includes(opt)}
-                    onChange={() => toggleZipOption(opt)}
-                    className="w-4 h-4"
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
+        )}
 
-        {/* Size chart — optional, shared across every product in this batch */}
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Size chart images (optional — applied to every product in this batch; falls back to the category's size chart if left empty)
-          </label>
-          <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-            {sizeChart.map((url, idx) => (
-              <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-ink/5">
-                <img src={url} alt="" className="w-full h-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => removeSizeChartImage(idx)}
-                  className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
-                >
-                  <X size={12} />
-                </button>
+        {/* Type-specific fields (brand / warranty / FSSAI / specs ...) shared by the batch */}
+        {category && (
+          <ProductTypeFields
+            type={type}
+            attributes={attributes}
+            specs={specs}
+            onAttr={(k, v) => setAttributes((prev) => ({ ...prev, [k]: v }))}
+            onSpecs={setSpecs}
+            inputClassName={inputCls}
+            labelClassName="block text-sm font-medium mb-1"
+          />
+        )}
+
+        {/* Sleeve / Zip — apparel only */}
+        {category && type.showSleeveZip && (
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Sleeve Type Options (optional)</label>
+              <div className="flex flex-wrap gap-3">
+                {['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'].map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="checkbox" checked={sleeveOptions.includes(opt)} onChange={() => toggleSleeveOption(opt)} className="w-4 h-4" />
+                    {opt}
+                  </label>
+                ))}
               </div>
-            ))}
-            <button
-              type="button"
-              disabled={sizeChartUploading}
-              onClick={() => document.getElementById('bulk-size-chart-input')?.click()}
-              className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
-            >
-              {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-            </button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Zip Type Options (optional)</label>
+              <div className="flex flex-wrap gap-3">
+                {['With Zip', 'Without Zip'].map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="checkbox" checked={zipOptions.includes(opt)} onChange={() => toggleZipOption(opt)} className="w-4 h-4" />
+                    {opt}
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
-          <input
-            id="bulk-size-chart-input"
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={handleSizeChartFilesChange}
-          />
-        </div>
+        )}
+
+        {/* Size chart — apparel only, shared across every product in this batch */}
+        {category && type.showSizeChart && (
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Size chart images (optional — applied to every product in this batch; falls back to the category's size chart if left empty)
+            </label>
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+              {sizeChart.map((url, idx) => (
+                <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-ink/5">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeSizeChartImage(idx)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                disabled={sizeChartUploading}
+                onClick={() => document.getElementById('bulk-size-chart-input')?.click()}
+                className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
+              >
+                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+              </button>
+            </div>
+            <input
+              id="bulk-size-chart-input"
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleSizeChartFilesChange}
+            />
+          </div>
+        )}
 
         {/* Ready to ship — applies to every product created in this batch */}
         <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
@@ -390,14 +405,16 @@ export default function BulkAddProductsPage() {
           Mark all products in this batch as "Ready to Ship"
         </label>
 
-        {/* Predefined sizes from the category */}
+        {/* Predefined sizes / pack sizes from the category */}
         {categorySizes.length > 0 && (
           <div>
-            <label className="block text-sm font-medium mb-2">Stock per size (applies to every product)</label>
+            <label className="block text-sm font-medium mb-2">
+              Stock per {type.defaultSize ? 'option' : 'size'} (applies to every product)
+            </label>
             <div className="flex flex-wrap gap-3">
               {categorySizes.map((size) => (
                 <div key={size} className="flex items-center gap-2">
-                  <span className="text-xs font-semibold w-8">{size}</span>
+                  <span className="text-xs font-semibold min-w-8">{size}</span>
                   <input
                     type="number"
                     min="0"
@@ -412,8 +429,27 @@ export default function BulkAddProductsPage() {
           </div>
         )}
 
-        {/* Fallback: category has no sizes configured, let admin add sizes manually for this batch */}
-        {category && categorySizes.length === 0 && (
+        {/* Non-apparel category with no configured options: just one stock number */}
+        {noSizeMode && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Stock per product</label>
+            <input
+              type="number"
+              min="0"
+              value={singleStock}
+              onChange={(e) => setSingleStock(e.target.value)}
+              placeholder="0"
+              className="w-32 px-3 py-2 text-sm rounded-lg border border-brand-ink/10 outline-none"
+            />
+            <p className="text-xs text-brand-ink/40 mt-1">
+              Each product gets a single "{type.defaultSize}" option. To sell pack sizes (e.g. 250g / 500g),
+              set them on the category first.
+            </p>
+          </div>
+        )}
+
+        {/* Apparel category with no sizes configured: add sizes manually for this batch */}
+        {category && categorySizes.length === 0 && !noSizeMode && (
           <div className="border border-brand-gold/40 bg-brand-gold/5 rounded-lg p-3">
             <p className="text-sm font-medium mb-1">No sizes configured for this category</p>
             <p className="text-xs text-brand-ink/50 mb-3">

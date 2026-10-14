@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Plus, Trash2, Upload, Loader2, X } from 'lucide-react';
+import { getType } from '@/lib/productTypes';
+import ProductTypeFields from '@/components/ProductTypeFields';
 
 // Design tokens — same white/peach minimalist system as the rest of the site.
 const INK = '#241B21';
@@ -139,13 +141,7 @@ function ImageSlot({ value, onChange, onRemove, showRemove, compact = false }) {
         )}
       </div>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={handleFile}
-      />
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
 
       <button
         type="button"
@@ -179,8 +175,6 @@ function ImageSlot({ value, onChange, onRemove, showRemove, compact = false }) {
 }
 
 // Reusable editor for a list of named add-on options (pants / shawls).
-// Each option gets its own image, extra price (added on top of the
-// variant price when a customer picks it), stock, and optional SKU.
 function AddonOptionsEditor({ title, options, onAdd, onUpdate, onRemove }) {
   return (
     <div style={cardStyle}>
@@ -221,40 +215,23 @@ function AddonOptionsEditor({ title, options, onAdd, onUpdate, onRemove }) {
             showRemove={!!opt.image}
           />
           <div className="grid sm:grid-cols-4 gap-2 flex-1">
-            <input
-              placeholder="Name (e.g. Cotton Palazzo)"
-              style={{ ...inputStyle, marginTop: 0 }}
-              value={opt.name}
-              onChange={(e) => onUpdate(idx, 'name', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
-            />
-            <input
-              type="number"
-              placeholder="Extra price ₹"
-              style={{ ...inputStyle, marginTop: 0 }}
-              value={opt.price}
-              onChange={(e) => onUpdate(idx, 'price', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
-            />
-            <input
-              type="number"
-              placeholder="Stock"
-              style={{ ...inputStyle, marginTop: 0 }}
-              value={opt.stock}
-              onChange={(e) => onUpdate(idx, 'stock', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
-            />
-            <input
-              placeholder="SKU (optional)"
-              style={{ ...inputStyle, marginTop: 0 }}
-              value={opt.sku}
-              onChange={(e) => onUpdate(idx, 'sku', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
-            />
+            {[
+              ['name', 'Name (e.g. Cotton Palazzo)', 'text'],
+              ['price', 'Extra price ₹', 'number'],
+              ['stock', 'Stock', 'number'],
+              ['sku', 'SKU (optional)', 'text'],
+            ].map(([key, placeholder, inputType]) => (
+              <input
+                key={key}
+                type={inputType}
+                placeholder={placeholder}
+                style={{ ...inputStyle, marginTop: 0 }}
+                value={opt[key]}
+                onChange={(e) => onUpdate(idx, key, e.target.value)}
+                onFocus={(e) => (e.target.style.borderColor = PEACH)}
+                onBlur={(e) => (e.target.style.borderColor = LINE)}
+              />
+            ))}
           </div>
           <button
             type="button"
@@ -291,6 +268,8 @@ export default function ProductForm({ initial, productId }) {
       zipOptions: base.zipOptions || [],
       pantOptions: (base.pantOptions || []).map((o) => ({ ...o })),
       shawlOptions: (base.shawlOptions || []).map((o) => ({ ...o })),
+      attributes: { ...(base.attributes || {}) },
+      specs: (base.specs || []).map((s) => ({ key: s.key || '', value: s.value || '' })),
     };
   });
   const [saving, setSaving] = useState(false);
@@ -304,6 +283,40 @@ export default function ProductForm({ initial, productId }) {
   useEffect(() => {
     fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.categories || []));
   }, []);
+
+  // ---- product type, derived from the selected category ----
+  const catId = form.category?._id || form.category || '';
+  const selectedCategory = categories.find((c) => c._id === catId);
+  const ready = !!selectedCategory; // type-specific sections appear once a category is chosen
+  const typeKey = selectedCategory ? (selectedCategory.productType || 'apparel') : null;
+  const type = getType(typeKey);
+
+  // "Parent — Child" labels for the flat category list
+  function categoryLabel(c) {
+    const parent = c.parent ? categories.find((p) => p._id === String(c.parent)) : null;
+    return parent ? `${parent.name} — ${c.name}` : c.name;
+  }
+
+  function handleCategoryChange(id) {
+    const next = categories.find((c) => c._id === id);
+    const nextKey = next ? (next.productType || 'apparel') : null;
+    const nextType = getType(nextKey);
+    const typeChanged = typeKey !== null && nextKey !== null && typeKey !== nextKey;
+
+    setForm((f) => ({
+      ...f,
+      category: id,
+      // switching between types clears fields that belong to the old type
+      ...(typeChanged
+        ? { attributes: {}, specs: [], fabric: '', sleeveOptions: [], zipOptions: [], pantOptions: [], shawlOptions: [], sizeChart: [] }
+        : {}),
+      // non-apparel: pre-fill "Standard" for blank size rows
+      variants: f.variants.map((v) => ({
+        ...v,
+        sizes: v.sizes.map((s) => (s.size ? s : { ...s, size: nextType.defaultSize })),
+      })),
+    }));
+  }
 
   function update(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
@@ -401,7 +414,12 @@ export default function ProductForm({ initial, productId }) {
     });
   }
 
-  function addVariant() { setForm((f) => ({ ...f, variants: [...f.variants, emptyVariant()] })); }
+  function addVariant() {
+    setForm((f) => ({
+      ...f,
+      variants: [...f.variants, { ...emptyVariant(), sizes: [{ size: type.defaultSize, stock: 0, sku: '' }] }],
+    }));
+  }
   function removeVariant(idx) { setForm((f) => ({ ...f, variants: f.variants.filter((_, i) => i !== idx) })); }
 
   // Pant / Shawl option list handlers — same shape, different field name.
@@ -419,8 +437,7 @@ export default function ProductForm({ initial, productId }) {
     setForm((f) => ({ ...f, [field]: (f[field] || []).filter((_, i) => i !== idx) }));
   }
 
-  // Size chart — supports multiple images. Each URL is added to the form as soon
-  // as its upload succeeds, so a failure part-way doesn't lose earlier uploads.
+  // Size chart — multiple images; each URL is added as soon as its upload succeeds.
   async function handleSizeChartFilesChange(e) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -448,15 +465,23 @@ export default function ProductForm({ initial, productId }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (!ready) {
+      toast.error('Select a category first');
+      return;
+    }
     setSaving(true);
     try {
-      // Note: sku is intentionally omitted — it's auto-generated/managed server-side
-      // based on the product's category (see /api/products and /api/products/[id]).
+      // sku is omitted on purpose — it's generated/managed server-side.
+      // The server also derives productType from the category and strips any
+      // field that doesn't belong to it, so this payload can be generous.
       const payload = {
         ...form,
+        category: catId,
         sizeChart: form.sizeChart || [],
         sleeveOptions: form.sleeveOptions || [],
         zipOptions: form.zipOptions || [],
+        attributes: form.attributes || {},
+        specs: form.specs || [],
         pantOptions: (form.pantOptions || [])
           .filter((o) => o.name?.trim())
           .map((o) => ({
@@ -506,6 +531,9 @@ export default function ProductForm({ initial, productId }) {
     }
   }
 
+  const focusPeach = (e) => (e.target.style.borderColor = PEACH);
+  const blurLine = (e) => (e.target.style.borderColor = LINE);
+
   return (
     <form onSubmit={submit} className="space-y-6">
 
@@ -521,8 +549,8 @@ export default function ProductForm({ initial, productId }) {
               style={inputStyle}
               value={form.name}
               onChange={(e) => update('name', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
+              onFocus={focusPeach}
+              onBlur={blurLine}
             />
           </div>
           <div>
@@ -540,33 +568,42 @@ export default function ProductForm({ initial, productId }) {
             <select
               required
               style={inputStyle}
-              value={form.category?._id || form.category}
-              onChange={(e) => update('category', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
+              value={catId}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              onFocus={focusPeach}
+              onBlur={blurLine}
             >
               <option value="">Select category</option>
-              {categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+              {categories.map((c) => <option key={c._id} value={c._id}>{categoryLabel(c)}</option>)}
             </select>
+            <p style={{ ...labelStyle, fontWeight: '400', marginTop: '4px' }}>
+              {ready
+                ? `Product type: ${type.label}`
+                : 'Pick a category — the fields below adapt to the kind of product.'}
+            </p>
           </div>
-          <div>
-            <label style={labelStyle}>Fabric</label>
-            <input
-              style={inputStyle}
-              value={form.fabric}
-              onChange={(e) => update('fabric', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
-            />
-          </div>
+
+          {ready && type.showFabric && (
+            <div>
+              <label style={labelStyle}>Fabric</label>
+              <input
+                style={inputStyle}
+                value={form.fabric}
+                onChange={(e) => update('fabric', e.target.value)}
+                onFocus={focusPeach}
+                onBlur={blurLine}
+              />
+            </div>
+          )}
+
           <div>
             <label style={labelStyle}>Tags (comma separated)</label>
             <input
               style={inputStyle}
               value={Array.isArray(form.tags) ? form.tags.join(', ') : ''}
               onChange={(e) => update('tags', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
+              onFocus={focusPeach}
+              onBlur={blurLine}
             />
           </div>
           <div className="sm:col-span-2">
@@ -576,96 +613,109 @@ export default function ProductForm({ initial, productId }) {
               rows={3}
               value={form.description}
               onChange={(e) => update('description', e.target.value)}
-              onFocus={(e) => (e.target.style.borderColor = PEACH)}
-              onBlur={(e) => (e.target.style.borderColor = LINE)}
+              onFocus={focusPeach}
+              onBlur={blurLine}
             />
           </div>
 
-          {/* Size chart — one or more images. If left empty, the storefront
-              falls back to this product's category size chart. */}
-          <div className="sm:col-span-2">
-            <label style={labelStyle}>
-              Size Chart <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>
-                (optional — shown as a gallery on the product page; falls back to the category's size chart if left empty)
-              </span>
-            </label>
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 mt-2">
-              {(form.sizeChart || []).map((url, idx) => (
-                <div key={idx} className="relative aspect-square overflow-hidden" style={{ borderRadius: '4px', border: `1px solid ${LINE}` }}>
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeSizeChartImage(idx)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(0,0,0,0.6)', color: PAPER }}
-                  >
-                    <X size={12} />
-                  </button>
+          {/* Type-specific fields: brand / warranty / FSSAI / specs ... */}
+          {ready && (
+            <ProductTypeFields
+              type={type}
+              attributes={form.attributes}
+              specs={form.specs}
+              onAttr={(k, v) => update('attributes', { ...form.attributes, [k]: v })}
+              onSpecs={(s) => update('specs', s)}
+              inputStyle={inputStyle}
+              labelStyle={labelStyle}
+            />
+          )}
+
+          {/* Size chart — apparel only. Falls back to the category's chart when empty. */}
+          {ready && type.showSizeChart && (
+            <div className="sm:col-span-2">
+              <label style={labelStyle}>
+                Size Chart <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>
+                  (optional — shown as a gallery on the product page; falls back to the category's size chart if left empty)
+                </span>
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 mt-2">
+                {(form.sizeChart || []).map((url, idx) => (
+                  <div key={idx} className="relative aspect-square overflow-hidden" style={{ borderRadius: '4px', border: `1px solid ${LINE}` }}>
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeSizeChartImage(idx)}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: PAPER }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={sizeChartUploading}
+                  onClick={() => sizeChartFileRef.current?.click()}
+                  className="aspect-square flex flex-col items-center justify-center gap-1 disabled:opacity-50"
+                  style={{ borderRadius: '4px', border: `1.5px dashed ${PEACH}`, background: PEACH_WASH, color: PEACH, cursor: 'pointer' }}
+                >
+                  {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span style={{ fontSize: '10px', fontFamily: 'sans-serif' }}>{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+                </button>
+              </div>
+              <input
+                ref={sizeChartFileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleSizeChartFilesChange}
+              />
+            </div>
+          )}
+
+          {/* Sleeve/Zip options — apparel only */}
+          {ready && type.showSleeveZip && (
+            <div className="sm:col-span-2 grid sm:grid-cols-2 gap-4">
+              <div>
+                <label style={labelStyle}>
+                  Sleeve Type Options <span style={{ fontWeight: '400' }}>(optional)</span>
+                </label>
+                <div className="flex flex-wrap gap-3 mt-2">
+                  {['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'].map((opt) => (
+                    <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
+                      <input
+                        type="checkbox"
+                        checked={(form.sleeveOptions || []).includes(opt)}
+                        onChange={() => toggleArrayValue('sleeveOptions', opt)}
+                        style={{ accentColor: PEACH, width: '15px', height: '15px' }}
+                      />
+                      {opt}
+                    </label>
+                  ))}
                 </div>
-              ))}
-              <button
-                type="button"
-                disabled={sizeChartUploading}
-                onClick={() => sizeChartFileRef.current?.click()}
-                className="aspect-square flex flex-col items-center justify-center gap-1 disabled:opacity-50"
-                style={{ borderRadius: '4px', border: `1.5px dashed ${PEACH}`, background: PEACH_WASH, color: PEACH, cursor: 'pointer' }}
-              >
-                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                <span style={{ fontSize: '10px', fontFamily: 'sans-serif' }}>{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-              </button>
-            </div>
-            <input
-              ref={sizeChartFileRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleSizeChartFilesChange}
-            />
-          </div>
-
-          {/* Sleeve/Zip options — product-level, not per-variant. Admin picks
-              which apply to this product; customers choose one of each on
-              the PDP before adding to cart. Leave both unchecked for products
-              where they don't apply (sarees, dupattas, jewellery, etc). */}
-          <div className="sm:col-span-2 grid sm:grid-cols-2 gap-4">
-            <div>
-              <label style={labelStyle}>
-                Sleeve Type Options <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
-              </label>
-              <div className="flex flex-wrap gap-3 mt-2">
-                {['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'].map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
-                    <input
-                      type="checkbox"
-                      checked={(form.sleeveOptions || []).includes(opt)}
-                      onChange={() => toggleArrayValue('sleeveOptions', opt)}
-                      style={{ accentColor: PEACH, width: '15px', height: '15px' }}
-                    />
-                    {opt}
-                  </label>
-                ))}
+              </div>
+              <div>
+                <label style={labelStyle}>
+                  Zip Type Options <span style={{ fontWeight: '400' }}>(optional)</span>
+                </label>
+                <div className="flex flex-wrap gap-3 mt-2">
+                  {['With Zip', 'Without Zip'].map((opt) => (
+                    <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
+                      <input
+                        type="checkbox"
+                        checked={(form.zipOptions || []).includes(opt)}
+                        onChange={() => toggleArrayValue('zipOptions', opt)}
+                        style={{ accentColor: PEACH, width: '15px', height: '15px' }}
+                      />
+                      {opt}
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
-            <div>
-              <label style={labelStyle}>
-                Zip Type Options <span style={{ fontWeight: '400', textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
-              </label>
-              <div className="flex flex-wrap gap-3 mt-2">
-                {['With Zip', 'Without Zip'].map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer" style={{ color: INK, fontFamily: 'sans-serif' }}>
-                    <input
-                      type="checkbox"
-                      checked={(form.zipOptions || []).includes(opt)}
-                      onChange={() => toggleArrayValue('zipOptions', opt)}
-                      style={{ accentColor: PEACH, width: '15px', height: '15px' }}
-                    />
-                    {opt}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Toggles */}
           <div className="sm:col-span-2 flex flex-wrap gap-4">
@@ -696,206 +746,209 @@ export default function ProductForm({ initial, productId }) {
       </div>
 
       {/* Variants Section */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 style={{ ...sectionHeadStyle, marginBottom: 0 }}>Variants</h2>
-          <button
-            type="button"
-            onClick={addVariant}
-            className="flex items-center gap-1 text-sm font-medium px-4 py-2 transition-colors"
-            style={{
-              background: PAPER,
-              color: PEACH,
-              border: `1px solid ${PEACH}`,
-              borderRadius: '4px',
-              fontFamily: 'sans-serif',
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = PEACH;
-              e.currentTarget.style.color = PAPER;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = PAPER;
-              e.currentTarget.style.color = PEACH;
-            }}
-          >
-            <Plus size={16} /> Add Variant
-          </button>
-        </div>
-
-        {form.variants.map((v, vIdx) => (
-          <div key={vIdx} style={cardStyle}>
-            {/* Variant header */}
-            <div
-              className="flex justify-between items-center mb-3 pb-2"
-              style={{ borderBottom: `1px solid ${LINE}` }}
-            >
-              <span style={{ fontWeight: '500', fontSize: '13px', color: INK, fontFamily: 'sans-serif' }}>
-                Variant {vIdx + 1}
-              </span>
-              {form.variants.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeVariant(vIdx)}
-                  style={{ color: INK_SOFT, cursor: 'pointer' }}
-                >
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </div>
-
-            <div className="grid sm:grid-cols-4 gap-3 mb-3">
-              <input
-                placeholder="Color name (e.g. Green)"
-                style={inputStyle}
-                value={v.color}
-                onChange={(e) => updateVariant(vIdx, 'color', e.target.value)}
-                onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                onBlur={(e) => (e.target.style.borderColor = LINE)}
-              />
-              <input
-                type="color"
-                style={{ ...inputStyle, padding: '4px', height: '40px' }}
-                value={v.colorHex}
-                onChange={(e) => updateVariant(vIdx, 'colorHex', e.target.value)}
-              />
-              <input
-                placeholder="Price ₹"
-                type="number"
-                style={inputStyle}
-                value={v.price}
-                onChange={(e) => updateVariant(vIdx, 'price', e.target.value)}
-                onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                onBlur={(e) => (e.target.style.borderColor = LINE)}
-              />
-              <input
-                placeholder="Compare-at price ₹"
-                type="number"
-                style={inputStyle}
-                value={v.compareAtPrice}
-                onChange={(e) => updateVariant(vIdx, 'compareAtPrice', e.target.value)}
-                onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                onBlur={(e) => (e.target.style.borderColor = LINE)}
-              />
-            </div>
-
-            {/* Images header + bulk upload */}
-            <div className="flex items-center justify-between mb-2">
-              <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500' }}>
-                Images for this colour
-              </p>
-              <button
-                type="button"
-                disabled={variantUploading === vIdx}
-                onClick={() => variantFileRefs.current[vIdx]?.click()}
-                className="flex items-center gap-1 text-sm font-medium px-3 py-1.5"
-                style={uploadButtonStyle(variantUploading === vIdx)}
-              >
-                {variantUploading === vIdx
-                  ? <Loader2 size={14} className="animate-spin" />
-                  : <Upload size={14} />}
-                {variantUploading === vIdx ? 'Uploading…' : 'Upload images'}
-              </button>
-              <input
-                ref={(el) => { variantFileRefs.current[vIdx] = el; }}
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                onChange={(e) => handleVariantFiles(vIdx, e)}
-              />
-            </div>
-
-            {v.images.map((img, imgIdx) => (
-              <ImageSlot
-                key={imgIdx}
-                value={img}
-                onChange={(url) => updateVariantImage(vIdx, imgIdx, url)}
-                onRemove={() => removeVariantImage(vIdx, imgIdx)}
-                showRemove={v.images.length > 1}
-              />
-            ))}
+      {ready && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 style={{ ...sectionHeadStyle, marginBottom: 0 }}>Variants</h2>
             <button
               type="button"
-              onClick={() => addVariantImage(vIdx)}
-              style={{ fontSize: '12px', color: PEACH, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '12px', cursor: 'pointer' }}
+              onClick={addVariant}
+              className="flex items-center gap-1 text-sm font-medium px-4 py-2 transition-colors"
+              style={{
+                background: PAPER,
+                color: PEACH,
+                border: `1px solid ${PEACH}`,
+                borderRadius: '4px',
+                fontFamily: 'sans-serif',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = PEACH;
+                e.currentTarget.style.color = PAPER;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = PAPER;
+                e.currentTarget.style.color = PEACH;
+              }}
             >
-              + Add another image
-            </button>
-
-            <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '6px' }}>
-              Sizes &amp; Stock
-            </p>
-            {v.sizes.map((s, sIdx) => (
-              <div key={sIdx} className="flex gap-2 mb-2 items-center">
-                <input
-                  placeholder="Size (e.g. M, 38, Free Size)"
-                  style={{ ...inputStyle, width: '140px', marginTop: 0 }}
-                  value={s.size}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'size', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <input
-                  type="number"
-                  placeholder="Stock"
-                  style={{ ...inputStyle, width: '90px', marginTop: 0 }}
-                  value={s.stock}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'stock', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <input
-                  placeholder="SKU (optional)"
-                  style={{ ...inputStyle, flex: 1, marginTop: 0 }}
-                  value={s.sku}
-                  onChange={(e) => updateSize(vIdx, sIdx, 'sku', e.target.value)}
-                  onFocus={(e) => (e.target.style.borderColor = PEACH)}
-                  onBlur={(e) => (e.target.style.borderColor = LINE)}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeSize(vIdx, sIdx)}
-                  style={{ color: INK_SOFT, cursor: 'pointer', flexShrink: 0 }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => addSize(vIdx)}
-              style={{ fontSize: '12px', color: PEACH, fontFamily: 'sans-serif', fontWeight: '500', cursor: 'pointer' }}
-            >
-              + Add size
+              <Plus size={16} /> Add Variant
             </button>
           </div>
-        ))}
-      </div>
 
-      {/* Pant Options — optional, product-level, admin can add any number */}
-      <AddonOptionsEditor
-        title="Pant Options"
-        options={form.pantOptions}
-        onAdd={() => addAddonOption('pantOptions')}
-        onUpdate={(idx, key, value) => updateAddonOption('pantOptions', idx, key, value)}
-        onRemove={(idx) => removeAddonOption('pantOptions', idx)}
-      />
+          {form.variants.map((v, vIdx) => (
+            <div key={vIdx} style={cardStyle}>
+              {/* Variant header */}
+              <div
+                className="flex justify-between items-center mb-3 pb-2"
+                style={{ borderBottom: `1px solid ${LINE}` }}
+              >
+                <span style={{ fontWeight: '500', fontSize: '13px', color: INK, fontFamily: 'sans-serif' }}>
+                  Variant {vIdx + 1}
+                </span>
+                {form.variants.length > 1 && (
+                  <button type="button" onClick={() => removeVariant(vIdx)} style={{ color: INK_SOFT, cursor: 'pointer' }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
 
-      {/* Shawl Options — optional, product-level, admin can add any number */}
-      <AddonOptionsEditor
-        title="Shawl Options"
-        options={form.shawlOptions}
-        onAdd={() => addAddonOption('shawlOptions')}
-        onUpdate={(idx, key, value) => updateAddonOption('shawlOptions', idx, key, value)}
-        onRemove={(idx) => removeAddonOption('shawlOptions', idx)}
-      />
+              <div className={`grid ${type.hasColor ? 'sm:grid-cols-4' : 'sm:grid-cols-2'} gap-3 mb-3`}>
+                {type.hasColor && (
+                  <>
+                    <input
+                      placeholder="Color name (e.g. Green)"
+                      style={inputStyle}
+                      value={v.color}
+                      onChange={(e) => updateVariant(vIdx, 'color', e.target.value)}
+                      onFocus={focusPeach}
+                      onBlur={blurLine}
+                    />
+                    <input
+                      type="color"
+                      style={{ ...inputStyle, padding: '4px', height: '40px' }}
+                      value={v.colorHex}
+                      onChange={(e) => updateVariant(vIdx, 'colorHex', e.target.value)}
+                    />
+                  </>
+                )}
+                <input
+                  placeholder="Price ₹"
+                  type="number"
+                  required
+                  style={inputStyle}
+                  value={v.price}
+                  onChange={(e) => updateVariant(vIdx, 'price', e.target.value)}
+                  onFocus={focusPeach}
+                  onBlur={blurLine}
+                />
+                <input
+                  placeholder="Compare-at price ₹"
+                  type="number"
+                  style={inputStyle}
+                  value={v.compareAtPrice}
+                  onChange={(e) => updateVariant(vIdx, 'compareAtPrice', e.target.value)}
+                  onFocus={focusPeach}
+                  onBlur={blurLine}
+                />
+              </div>
+
+              {/* Images header + bulk upload */}
+              <div className="flex items-center justify-between mb-2">
+                <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500' }}>
+                  {type.hasColor ? 'Images for this colour' : 'Product images'}
+                </p>
+                <button
+                  type="button"
+                  disabled={variantUploading === vIdx}
+                  onClick={() => variantFileRefs.current[vIdx]?.click()}
+                  className="flex items-center gap-1 text-sm font-medium px-3 py-1.5"
+                  style={uploadButtonStyle(variantUploading === vIdx)}
+                >
+                  {variantUploading === vIdx
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Upload size={14} />}
+                  {variantUploading === vIdx ? 'Uploading…' : 'Upload images'}
+                </button>
+                <input
+                  ref={(el) => { variantFileRefs.current[vIdx] = el; }}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleVariantFiles(vIdx, e)}
+                />
+              </div>
+
+              {v.images.map((img, imgIdx) => (
+                <ImageSlot
+                  key={imgIdx}
+                  value={img}
+                  onChange={(url) => updateVariantImage(vIdx, imgIdx, url)}
+                  onRemove={() => removeVariantImage(vIdx, imgIdx)}
+                  showRemove={v.images.length > 1}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={() => addVariantImage(vIdx)}
+                style={{ fontSize: '12px', color: PEACH, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '12px', cursor: 'pointer' }}
+              >
+                + Add another image
+              </button>
+
+              <p style={{ fontSize: '12px', color: INK_SOFT, fontFamily: 'sans-serif', fontWeight: '500', marginBottom: '6px' }}>
+                {type.sizeLabel}
+              </p>
+              {v.sizes.map((s, sIdx) => (
+                <div key={sIdx} className="flex gap-2 mb-2 items-center">
+                  <input
+                    placeholder={type.sizePlaceholder}
+                    style={{ ...inputStyle, width: '200px', marginTop: 0 }}
+                    value={s.size}
+                    onChange={(e) => updateSize(vIdx, sIdx, 'size', e.target.value)}
+                    onFocus={focusPeach}
+                    onBlur={blurLine}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Stock"
+                    style={{ ...inputStyle, width: '90px', marginTop: 0 }}
+                    value={s.stock}
+                    onChange={(e) => updateSize(vIdx, sIdx, 'stock', e.target.value)}
+                    onFocus={focusPeach}
+                    onBlur={blurLine}
+                  />
+                  <input
+                    placeholder="SKU (optional)"
+                    style={{ ...inputStyle, flex: 1, marginTop: 0 }}
+                    value={s.sku}
+                    onChange={(e) => updateSize(vIdx, sIdx, 'sku', e.target.value)}
+                    onFocus={focusPeach}
+                    onBlur={blurLine}
+                  />
+                  {v.sizes.length > 1 && (
+                    <button type="button" onClick={() => removeSize(vIdx, sIdx)} style={{ color: INK_SOFT, cursor: 'pointer', flexShrink: 0 }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => addSize(vIdx)}
+                style={{ fontSize: '12px', color: PEACH, fontFamily: 'sans-serif', fontWeight: '500', cursor: 'pointer' }}
+              >
+                + Add {type.defaultSize ? 'option' : 'size'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pant / Shawl add-ons — apparel only */}
+      {ready && type.showAddons && (
+        <>
+          <AddonOptionsEditor
+            title="Pant Options"
+            options={form.pantOptions}
+            onAdd={() => addAddonOption('pantOptions')}
+            onUpdate={(idx, key, value) => updateAddonOption('pantOptions', idx, key, value)}
+            onRemove={(idx) => removeAddonOption('pantOptions', idx)}
+          />
+          <AddonOptionsEditor
+            title="Shawl Options"
+            options={form.shawlOptions}
+            onAdd={() => addAddonOption('shawlOptions')}
+            onUpdate={(idx, key, value) => updateAddonOption('shawlOptions', idx, key, value)}
+            onRemove={(idx) => removeAddonOption('shawlOptions', idx)}
+          />
+        </>
+      )}
 
       {/* Submit button */}
       <button
         type="submit"
-        disabled={saving}
+        disabled={saving || !ready}
         className="w-full sm:w-auto px-8 py-3 font-medium text-sm transition-opacity"
         style={{
           background: PEACH,
@@ -905,8 +958,8 @@ export default function ProductForm({ initial, productId }) {
           fontFamily: 'sans-serif',
           fontSize: '14px',
           letterSpacing: '0.02em',
-          cursor: saving ? 'not-allowed' : 'pointer',
-          opacity: saving ? 0.6 : 1,
+          cursor: saving || !ready ? 'not-allowed' : 'pointer',
+          opacity: saving || !ready ? 0.6 : 1,
         }}
       >
         {saving ? 'Saving...' : productId ? 'Update Product' : 'Create Product'}

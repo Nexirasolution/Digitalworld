@@ -7,13 +7,15 @@ const VariantSchema = new mongoose.Schema(
     images: [{ type: String }],
     price: { type: Number, required: true },
     compareAtPrice: { type: Number, default: 0 },
+    // Holds sizes for apparel, pack sizes for food, configurations for electronics.
+    // The label shown in the UI comes from lib/productTypes.js.
     sizes: [
       {
         size: { type: String, required: true },
         stock: { type: Number, default: 0 },
-        sku: { type: String }
-      }
-    ]
+        sku: { type: String },
+      },
+    ],
   },
   { _id: true }
 );
@@ -24,7 +26,7 @@ const AddonOptionSchema = new mongoose.Schema(
     image: { type: String, default: '' },
     price: { type: Number, default: 0 },
     stock: { type: Number, default: 0 },
-    sku: { type: String, default: '' }
+    sku: { type: String, default: '' },
   },
   { _id: true }
 );
@@ -37,8 +39,14 @@ const ProductSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
 
-    // Which seller (Admin doc, role: 'seller') owns/added this product.
-    // null = added directly by a superadmin, not tied to any seller.
+    // NEW — set server-side from the category. Existing docs read as 'apparel'.
+    productType: { type: String, enum: ['apparel', 'electronics', 'food', 'general'], default: 'apparel', index: true },
+    // NEW — type-specific fields (brand, warrantyMonths, foodType, fssaiLicense, ...)
+    attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // NEW — free-form spec table, e.g. [{ key: 'Battery', value: '5000 mAh' }]
+    specs: [{ _id: false, key: String, value: String }],
+
+    // Which seller (Admin doc, role: 'seller') owns this product; null = superadmin.
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
 
     fabric: { type: String, default: '' },
@@ -60,7 +68,7 @@ const ProductSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     soldCount: { type: Number, default: 0 },
     seoTitle: String,
-    seoDescription: String
+    seoDescription: String,
   },
   { timestamps: true }
 );

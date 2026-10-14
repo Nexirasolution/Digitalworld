@@ -1,59 +1,63 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { dbConnect } from '@/lib/mongodb';
 import Combo from '@/models/Combo';
 import { requireAdmin } from '@/lib/apiAuth';
+import { buildComboData } from '@/lib/comboValidation';
 
-export const PUT = requireAdmin(async (req, { params }) => {
-  await dbConnect();
-  const body = await req.json();
+const notFound = () => NextResponse.json({ error: 'Combo not found' }, { status: 404 });
+const forbidden = () => NextResponse.json({ error: 'Only the store admin can do this' }, { status: 403 });
 
-  // Same validation as POST — findByIdAndUpdate does NOT run schema
-  // validators or these checks by default, so without this an edit could
-  // silently save a combo with no colors/packOptions/price and the
-  // storefront would render blank.
-  if (!body.name) {
-    return NextResponse.json({ error: 'Combo name is required' }, { status: 400 });
-  }
-
-  if (body.type === 'color-pack') {
-    if (!body.baseProduct) {
-      return NextResponse.json({ error: 'A base product is required for a color-pack combo' }, { status: 400 });
-    }
-    if (!Array.isArray(body.colors) || body.colors.length === 0) {
-      return NextResponse.json({ error: 'Add at least one color' }, { status: 400 });
-    }
-    if (!Array.isArray(body.packOptions) || body.packOptions.length === 0) {
-      return NextResponse.json({ error: 'Add at least one pack size option' }, { status: 400 });
-    }
-  } else if (!body.comboPrice) {
-    return NextResponse.json({ error: 'Combo price is required' }, { status: 400 });
-  }
-
+export const PUT = requireAdmin(async (req, { params }, admin) => {
+  if (admin.role !== 'superadmin') return forbidden();
   try {
-    // runValidators: true — without it, Mongoose skips schema validation
-    // on updates (required fields, casting) and can persist bad data.
-    const combo = await Combo.findByIdAndUpdate(params.id, body, {
-      new: true,
-      runValidators: true,
-    });
+    const { id } = await params;
+    if (!mongoose.isValidObjectId(id)) return notFound();
+    await dbConnect();
 
-    if (!combo) {
-      return NextResponse.json({ error: 'Combo not found' }, { status: 404 });
-    }
+    const combo = await Combo.findById(id);
+    if (!combo) return notFound();
 
+    const body = await req.json().catch(() => null);
+    if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+
+    // Same validation as create: findByIdAndUpdate skips it, which used to let an
+    // edit save a combo with no colours / packs / price.
+    const { data, error } = await buildComboData(body, admin);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+
+    combo.set(data); // slug is never changed
+    await combo.save();
     return NextResponse.json({ combo });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Failed to update combo' }, { status: 400 });
+    console.error('PUT /api/combos/[id] error:', err);
+    return NextResponse.json({ error: err.message || 'Failed to update combo' }, { status: 500 });
   }
 });
 
-export const DELETE = requireAdmin(async (req, { params }) => {
+// Quick show / hide without re-validating the whole combo.
+export const PATCH = requireAdmin(async (req, { params }, admin) => {
+  if (admin.role !== 'superadmin') return forbidden();
+  const { id } = await params;
+  if (!mongoose.isValidObjectId(id)) return notFound();
   await dbConnect();
-  const deleted = await Combo.findByIdAndDelete(params.id);
 
-  if (!deleted) {
-    return NextResponse.json({ error: 'Combo not found' }, { status: 404 });
+  const body = await req.json().catch(() => null);
+  if (typeof body?.isActive !== 'boolean') {
+    return NextResponse.json({ error: 'isActive (true/false) is required' }, { status: 400 });
   }
+  const res = await Combo.updateOne({ _id: id }, { $set: { isActive: body.isActive } });
+  if (!res.matchedCount) return notFound();
+  return NextResponse.json({ success: true, isActive: body.isActive });
+});
 
+export const DELETE = requireAdmin(async (req, { params }, admin) => {
+  if (admin.role !== 'superadmin') return forbidden();
+  const { id } = await params;
+  if (!mongoose.isValidObjectId(id)) return notFound();
+  await dbConnect();
+
+  const deleted = await Combo.findByIdAndDelete(id);
+  if (!deleted) return notFound();
   return NextResponse.json({ success: true });
 });

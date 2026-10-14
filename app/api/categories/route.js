@@ -5,15 +5,11 @@ import { dbConnect } from '@/lib/mongodb';
 import Category from '@/models/Category';
 import slugify from 'slugify';
 import { requireAdmin } from '@/lib/apiAuth';
+import { PRODUCT_TYPE_KEYS } from '@/lib/productTypes';
 
 // GET /api/categories
-// Returns:
-//   categories — the flat, sorted list (unchanged shape, used by the admin
-//                 category dropdown/select and anywhere else that just
-//                 needs every category regardless of hierarchy)
-//   topLevel   — only the main (parent-less) categories, each with a
-//                 `subcategories` array attached. This is what the navbar
-//                 should fetch to render "Main Category -> Subcategory" menus.
+//   categories — flat sorted list (now includes `productType` on each)
+//   topLevel   — parent-less categories each with a `subcategories` array
 export async function GET() {
   await dbConnect();
   const categories = await Category.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
@@ -37,14 +33,23 @@ export const POST = requireAdmin(async (req) => {
   await dbConnect();
   const body = await req.json();
   if (!body.name) return NextResponse.json({ error: 'Category name is required' }, { status: 400 });
+
   const slug = body.slug ? slugify(body.slug, { lower: true }) : slugify(body.name, { lower: true });
   const exists = await Category.findOne({ slug });
   if (exists) return NextResponse.json({ error: 'A category with this slug already exists' }, { status: 409 });
 
-  // `parent` should be a category id or null/omitted for a main category.
-  // No extra validation of "only one level deep" is enforced server-side —
-  // the admin UI only offers top-level categories as parent options, which
-  // keeps the hierarchy to two levels in practice.
-  const category = await Category.create({ ...body, slug, parent: body.parent || null });
+  // A subcategory always uses its parent's product type; a main category uses
+  // whatever the admin picked (default: apparel).
+  let productType = body.productType || 'apparel';
+  if (body.parent) {
+    const parent = await Category.findById(body.parent).select('productType');
+    if (!parent) return NextResponse.json({ error: 'Parent category not found' }, { status: 400 });
+    productType = parent.productType || 'apparel';
+  }
+  if (!PRODUCT_TYPE_KEYS.includes(productType)) {
+    return NextResponse.json({ error: 'Invalid product type' }, { status: 400 });
+  }
+
+  const category = await Category.create({ ...body, slug, parent: body.parent || null, productType });
   return NextResponse.json({ category }, { status: 201 });
 });

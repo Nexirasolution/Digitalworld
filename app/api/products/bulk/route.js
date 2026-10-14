@@ -4,6 +4,7 @@ import Product from '@/models/Product';
 import Category from '@/models/Category';
 import slugify from 'slugify';
 import { requireApprovedSeller } from '@/lib/apiAuth';
+import { resolveProductType, sanitizeByType } from '@/lib/productTypes';
 
 export const POST = requireApprovedSeller(async (req, ctx, admin) => {
   try {
@@ -24,6 +25,8 @@ export const POST = requireApprovedSeller(async (req, ctx, admin) => {
       sizeChart = [],
       sleeveOptions = [],
       zipOptions = [],
+      attributes = {},   // NEW — type-specific fields shared by the whole batch
+      specs = [],        // NEW
     } = body;
 
     if (!category) return NextResponse.json({ error: 'Category is required' }, { status: 400 });
@@ -38,18 +41,30 @@ export const POST = requireApprovedSeller(async (req, ctx, admin) => {
       .filter((s) => s.size)
       .map((s) => ({ size: s.size, stock: Number(s.stock) || 0 }));
     if (sizeEntries.length === 0) {
-      return NextResponse.json({ error: 'At least one size with stock is required' }, { status: 400 });
+      return NextResponse.json({ error: 'At least one size/option with stock is required' }, { status: 400 });
     }
 
-    const sizeChartImages = Array.isArray(sizeChart) ? sizeChart.filter(Boolean) : (sizeChart ? [sizeChart] : []);
+    const cat = await Category.findById(category).populate('parent', 'productType');
+    if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
 
+    // Strip anything that doesn't belong to this category's product type.
     const ALLOWED_SLEEVE = ['Full Sleeve', 'Half Sleeve', 'Elbow Sleeve', 'Sleeveless'];
     const ALLOWED_ZIP = ['With Zip', 'Without Zip'];
-    const sleeveOptionsClean = Array.isArray(sleeveOptions) ? sleeveOptions.filter((s) => ALLOWED_SLEEVE.includes(s)) : [];
-    const zipOptionsClean = Array.isArray(zipOptions) ? zipOptions.filter((z) => ALLOWED_ZIP.includes(z)) : [];
-
-    const cat = await Category.findById(category);
-    if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    const typeKey = resolveProductType(cat);
+    const { body: clean, error: typeError } = sanitizeByType(
+      {
+        fabric,
+        attributes,
+        specs,
+        sizeChart: Array.isArray(sizeChart) ? sizeChart.filter(Boolean) : (sizeChart ? [sizeChart] : []),
+        sleeveOptions: Array.isArray(sleeveOptions) ? sleeveOptions.filter((s) => ALLOWED_SLEEVE.includes(s)) : [],
+        zipOptions: Array.isArray(zipOptions) ? zipOptions.filter((z) => ALLOWED_ZIP.includes(z)) : [],
+        variants: [{ price: Number(price), sizes: sizeEntries }],
+      },
+      typeKey
+    );
+    if (typeError) return NextResponse.json({ error: typeError }, { status: 400 });
+    const finalSizes = clean.variants[0].sizes;
 
     const titleCode = (cat.name || 'PRODUCT').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!titleCode) {
@@ -110,7 +125,7 @@ export const POST = requireApprovedSeller(async (req, ctx, admin) => {
           images: [images[i]],
           price: Number(price),
           compareAtPrice: Number(compareAtPrice) || 0,
-          sizes: sizeEntries.map((s) => ({ ...s })),
+          sizes: finalSizes.map((s) => ({ ...s })),
         };
 
         const product = await Product.create({
@@ -120,14 +135,17 @@ export const POST = requireApprovedSeller(async (req, ctx, admin) => {
           description,
           category: cat._id,
           seller,
-          fabric,
+          productType: typeKey,
+          attributes: clean.attributes,
+          specs: clean.specs,
+          fabric: clean.fabric,
           tags,
           variants: [variant],
           basePrice: Number(price),
           isReadyToShip: !!isReadyToShip,
-          sizeChart: sizeChartImages,
-          sleeveOptions: sleeveOptionsClean,
-          zipOptions: zipOptionsClean,
+          sizeChart: clean.sizeChart,
+          sleeveOptions: clean.sleeveOptions,
+          zipOptions: clean.zipOptions,
         });
 
         created.push({ id: product._id, name: product.name, sku: product.sku });

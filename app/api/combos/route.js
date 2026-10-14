@@ -3,48 +3,51 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Combo from '@/models/Combo';
-import slugify from 'slugify';
 import { requireAdmin } from '@/lib/apiAuth';
+import { buildComboData, createCombo } from '@/lib/comboValidation';
+import { withStockInfo } from '@/lib/comboStock';
 
-export async function GET(req) {
+const withProducts = (q) =>
+  q
+    .populate('products.product', 'name slug variants isActive')
+    .populate('baseProduct', 'name slug variants isActive')
+    .lean();
+
+// Everything (including hidden combos) — admin only. Sellers get their own via /api/seller/combos.
+const adminList = requireAdmin(async (req, ctx, admin) => {
   await dbConnect();
+  const query = admin.role === 'superadmin' ? {} : { seller: admin.id };
+  const combos = await withProducts(Combo.find(query).sort({ createdAt: -1 }).limit(200));
+  return NextResponse.json({ combos: combos.map((c) => withStockInfo(c, { depopulate: true })) });
+});
+
+export async function GET(req, ctx) {
   const { searchParams } = new URL(req.url);
-  const all = searchParams.get('all');
-  const query = all ? {} : { isActive: true };
-  const combos = await Combo.find(query)
-    .populate('products.product', 'name slug variants')
-    .populate('baseProduct', 'name slug variants')
-    .sort({ createdAt: -1 });
-  return NextResponse.json({ combos });
+
+  // `?all=true` used to be public and leaked hidden combos — it now needs a login.
+  if (searchParams.get('all')) return adminList(req, ctx);
+
+  await dbConnect();
+  const combos = await withProducts(Combo.find({ isActive: true }).sort({ createdAt: -1 }));
+  return NextResponse.json({ combos: combos.map((c) => withStockInfo(c)) });
 }
 
-export const POST = requireAdmin(async (req) => {
-  await dbConnect();
-  const body = await req.json();
-
-  if (!body.name) {
-    return NextResponse.json({ error: 'Combo name is required' }, { status: 400 });
+export const POST = requireAdmin(async (req, ctx, admin) => {
+  if (admin.role !== 'superadmin') {
+    return NextResponse.json({ error: 'Sellers create combos from the seller panel' }, { status: 403 });
   }
-
-  if (body.type === 'color-pack') {
-    if (!body.baseProduct) {
-      return NextResponse.json({ error: 'A base product is required for a color-pack combo' }, { status: 400 });
-    }
-    if (!Array.isArray(body.colors) || body.colors.length === 0) {
-      return NextResponse.json({ error: 'Add at least one color' }, { status: 400 });
-    }
-    if (!Array.isArray(body.packOptions) || body.packOptions.length === 0) {
-      return NextResponse.json({ error: 'Add at least one pack size option' }, { status: 400 });
-    }
-  } else if (!body.comboPrice) {
-    return NextResponse.json({ error: 'Combo price is required' }, { status: 400 });
-  }
-
   try {
-    const slug = slugify(body.name, { lower: true }) + '-' + Date.now().toString().slice(-4);
-    const combo = await Combo.create({ ...body, slug });
+    await dbConnect();
+    const body = await req.json().catch(() => null);
+    if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+
+    const { data, error } = await buildComboData(body, admin);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+
+    const combo = await createCombo(data);
     return NextResponse.json({ combo }, { status: 201 });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Failed to create combo' }, { status: 400 });
+    console.error('POST /api/combos error:', err);
+    return NextResponse.json({ error: err.message || 'Failed to create combo' }, { status: 500 });
   }
 });

@@ -148,50 +148,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Intro / Featured collection — centered copy, up to 6 New Arrivals, CTA */}
-      {/* Top padding reduced (was pt-16) and heading margin removed (was mt-14)
-          to close the big gap under Shop by Category. */}
-      <section className="max-w-6xl mx-auto px-4 pt-8 sm:pt-10 pb-16 text-center">
-        {/* <h2
-          className="text-2xl sm:text-3xl font-bold tracking-[1px]"
-          style={{ color: INK, fontFamily: FONT_SANS }}
-        >
-          Fall in Love with Our Block-Printed Clothing
-        </h2>
-
-        <p className="mt-5 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed font-light" style={{ color: INK_SOFT, fontFamily: FONT_SANS }}>
-          Celebrate femininity and grace. Think intricate designs, vibrant colors, and a touch of
-          cultural elegance. Whether you&rsquo;re heading out for a casual day or dressing up for a
-          special occasion, these pieces are your new best friend.
-        </p> */}
-
-        <h3
-          className="text-lg sm:text-xl font-bold tracking-[3px] uppercase"
-          style={{ color: INK, fontFamily: FONT_SANS }}
-        >
-          Featured Collection
-        </h3>
-
-        {/* Narrowed from 6 columns to 2/3/4 so each ProductCard renders large */}
-        {plainNewArrivals.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6 sm:gap-8 mt-8 text-left">
-            {plainNewArrivals.map((p) => (
-              <ProductCard key={p._id} product={p} />
-            ))}
-          </div>
-        )}
-
-        {/* Colors live in classes (not inline style) so the hover state can override them */}
-        <Link
-          href="/products"
-          className="inline-block mt-10 px-8 py-3 text-[12px] font-bold tracking-[2px] uppercase transition-colors bg-black text-[#C9A227] border border-[#C9A227] hover:bg-[#C9A227] hover:text-black"
-          style={{ fontFamily: FONT_SANS }}
-        >
-          Shop the collection
-        </Link>
-      </section>
-
-      {/* Combo Offers */}
+{/* Combo Offers */}
       {plainCombos?.length > 0 && (
         <section className="py-16 bg-white border-t" style={{ borderColor: HAIRLINE }}>
           <div className="max-w-6xl mx-auto px-4">
@@ -212,7 +169,7 @@ export default async function HomePage() {
                 Buy together, save together
               </p>
               <Link
-                href="/combos"
+                href="/combo"
                 className="hidden sm:flex items-center gap-1 text-sm font-bold hover:gap-2 transition-all mt-3"
                 style={{ color: INK, fontFamily: FONT_SANS }}
               >
@@ -317,6 +274,50 @@ export default async function HomePage() {
         </section>
       )}
 
+      {/* Intro / Featured collection — centered copy, up to 6 New Arrivals, CTA */}
+      {/* Top padding reduced (was pt-16) and heading margin removed (was mt-14)
+          to close the big gap under Shop by Category. */}
+      <section className="max-w-6xl mx-auto px-4 pt-8 sm:pt-10 pb-16 text-center">
+        {/* <h2
+          className="text-2xl sm:text-3xl font-bold tracking-[1px]"
+          style={{ color: INK, fontFamily: FONT_SANS }}
+        >
+          Fall in Love with Our Block-Printed Clothing
+        </h2>
+
+        <p className="mt-5 max-w-2xl mx-auto text-sm sm:text-base leading-relaxed font-light" style={{ color: INK_SOFT, fontFamily: FONT_SANS }}>
+          Celebrate femininity and grace. Think intricate designs, vibrant colors, and a touch of
+          cultural elegance. Whether you&rsquo;re heading out for a casual day or dressing up for a
+          special occasion, these pieces are your new best friend.
+        </p> */}
+
+        <h3
+          className="text-lg sm:text-xl font-bold tracking-[3px] uppercase"
+          style={{ color: INK, fontFamily: FONT_SANS }}
+        >
+          Featured Collection
+        </h3>
+
+        {/* Narrowed from 6 columns to 2/3/4 so each ProductCard renders large */}
+        {plainNewArrivals.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6 sm:gap-8 mt-8 text-left">
+            {plainNewArrivals.map((p) => (
+              <ProductCard key={p._id} product={p} />
+            ))}
+          </div>
+        )}
+
+        {/* Colors live in classes (not inline style) so the hover state can override them */}
+        <Link
+          href="/products"
+          className="inline-block mt-10 px-8 py-3 text-[12px] font-bold tracking-[2px] uppercase transition-colors bg-black text-[#C9A227] border border-[#C9A227] hover:bg-[#C9A227] hover:text-black"
+          style={{ fontFamily: FONT_SANS }}
+        >
+          Shop the collection
+        </Link>
+      </section>
+
+      
       {/* Reviews */}
       <ReviewSection reviews={JSON.parse(JSON.stringify(reviews))} />
 

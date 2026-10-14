@@ -7,6 +7,7 @@ import Category from '@/models/Category';
 import slugify from 'slugify';
 import { requireApprovedSeller } from '@/lib/apiAuth';
 import { generateSku } from '@/lib/sku';
+import { resolveProductType, sanitizeByType, PRODUCT_TYPE_KEYS } from '@/lib/productTypes';
 
 export async function GET(req) {
   try {
@@ -26,6 +27,13 @@ export async function GET(req) {
         const categoryIds = [cat._id, ...subcats.map((c) => c._id)];
         query.category = { $in: categoryIds };
       }
+    }
+
+    // NEW: optional ?productType=food|electronics|apparel|general
+    const productType = searchParams.get('productType');
+    if (productType && PRODUCT_TYPE_KEYS.includes(productType)) {
+      // legacy docs have no stored value and count as apparel
+      query.productType = productType === 'apparel' ? { $in: ['apparel', null] } : productType;
     }
 
     const size = searchParams.get('size');
@@ -66,7 +74,7 @@ export async function GET(req) {
       priceLow: { basePrice: 1 },
       priceHigh: { basePrice: -1 },
       popular: { soldCount: -1 },
-      rating: { rating: -1 }
+      rating: { rating: -1 },
     };
 
     const limitParam = searchParams.get('limit');
@@ -75,7 +83,7 @@ export async function GET(req) {
     const limit = Number(limitParam || 24);
 
     let productsQuery = Product.find(query)
-      .populate('category', 'name slug type sizeChart')
+      .populate('category', 'name slug type sizeChart productType')
       .sort(sortMap[sort] || sortMap.newest);
 
     if (!fetchAll) productsQuery = productsQuery.skip((page - 1) * limit).limit(limit);
@@ -102,21 +110,29 @@ export const POST = requireApprovedSeller(async (req, ctx, admin) => {
       return NextResponse.json({ error: 'Product name and category are required' }, { status: 400 });
     }
 
-    const sku = await generateSku(body.category);
-    const slug = body.slug ? slugify(body.slug, { lower: true }) : slugify(body.name, { lower: true });
+    // The product type always comes from the category, never from the client.
+    const catId = body.category?._id || body.category;
+    const cat = await Category.findById(catId).populate('parent', 'productType');
+    if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+
+    const typeKey = resolveProductType(cat);
+    const { body: clean, error } = sanitizeByType({ ...body, category: cat._id }, typeKey);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+
+    const sku = await generateSku(cat._id);
+    const slug = clean.slug ? slugify(clean.slug, { lower: true }) : slugify(clean.name, { lower: true });
     const exists = await Product.findOne({ slug });
     if (exists) return NextResponse.json({ error: 'A product with this slug already exists' }, { status: 409 });
 
-    const basePrice = body.variants?.length
-      ? Math.min(...body.variants.map((v) => v.price))
-      : body.basePrice || 0;
+    const basePrice = clean.variants?.length
+      ? Math.min(...clean.variants.map((v) => v.price))
+      : clean.basePrice || 0;
 
-    // Ownership: a seller can only ever create products under their own
-    // account, regardless of what (if anything) the client sends as `seller`.
+    // Ownership: a seller can only create products under their own account.
     // A superadmin creating a product directly leaves it unowned (null).
     const seller = admin.role === 'seller' ? admin.id : (body.seller || null);
 
-    const product = await Product.create({ ...body, slug, sku, basePrice, seller });
+    const product = await Product.create({ ...clean, slug, sku, basePrice, seller });
     return NextResponse.json({ product }, { status: 201 });
   } catch (err) {
     console.error('POST /api/products error:', err);

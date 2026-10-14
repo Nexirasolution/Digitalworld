@@ -8,14 +8,14 @@ function getFilter(id) {
   return mongoose.isValidObjectId(id) ? { _id: id } : { slug: id };
 }
 
-// Seller-facing single product fetch for the edit form. Unlike the public
-// GET /api/products/[id], this returns the product regardless of isActive
-// status, and enforces ownership — a seller can only load their own
-// products; a superadmin can load any.
+// Seller-facing single product fetch for the edit form. Returns the product
+// regardless of isActive and enforces ownership — a seller can only load their
+// own products; a superadmin can load any.
 export const GET = requireAdmin(async (req, { params }, admin) => {
   await dbConnect();
 
-  const product = await Product.findOne(getFilter(params.id)).populate('category', 'name slug parent');
+  // productType added so the edit form knows which fields to show immediately
+  const product = await Product.findOne(getFilter(params.id)).populate('category', 'name slug parent productType');
   if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
   if (!ownsProduct(admin, product)) {

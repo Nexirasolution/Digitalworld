@@ -3,8 +3,13 @@
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Plus, Trash2, Pencil, X, Upload, Loader2, ArrowUp, ArrowDown, CornerDownRight } from 'lucide-react';
+import { getType } from '@/lib/productTypes';
+import CategoryTypeSelect from '@/components/CategoryTypeSelect';
 
-const emptyForm = { name: '', slug: '', image: '', description: '', sizes: '', sortOrder: 0, sizeChart: [], parent: '' };
+const emptyForm = {
+  name: '', slug: '', image: '', description: '', sizes: '', sortOrder: 0,
+  sizeChart: [], parent: '', productType: 'apparel',
+};
 
 function normalizeSizeChart(value) {
   if (Array.isArray(value)) return value;
@@ -47,7 +52,7 @@ function CategoryRow({ category, indent, onMoveUp, onMoveDown, disableUp, disabl
       <div className="flex-1">
         <p className="font-medium">{category.name}</p>
         <p className="text-xs text-brand-ink/50">
-          /{category.slug} · order: {category.sortOrder ?? 0}
+          /{category.slug} · {getType(category.productType).label} · order: {category.sortOrder ?? 0}
           {category.sizeChart?.length ? ` · ${category.sizeChart.length} size chart image${category.sizeChart.length > 1 ? 's' : ''}` : ''}
         </p>
       </div>
@@ -83,8 +88,10 @@ export default function AdminCategoriesPage() {
 
   const topLevel = categories.filter((c) => !parentIdOf(c));
   const childrenOf = (id) => categories.filter((c) => parentIdOf(c) === id);
+  const typeInfo = getType(form.productType);
 
   function startEdit(c) {
+    const parent = topLevel.find((p) => p._id === parentIdOf(c));
     setEditingId(c._id);
     setForm({
       name: c.name,
@@ -94,7 +101,9 @@ export default function AdminCategoriesPage() {
       sizes: (c.sizes || []).join(', '),
       sortOrder: c.sortOrder ?? 0,
       sizeChart: normalizeSizeChart(c.sizeChart),
-      parent: parentIdOf(c) || ''
+      parent: parentIdOf(c) || '',
+      // subcategories always show their parent's type
+      productType: (parent?.productType || c.productType || 'apparel'),
     });
     setPreview(c.image || '');
     setShowForm(true);
@@ -111,9 +120,15 @@ export default function AdminCategoriesPage() {
 
   function startNewSub(parentId) {
     setEditingId(null);
+    const parent = topLevel.find((c) => c._id === parentId);
     const siblings = childrenOf(parentId);
     const maxOrder = siblings.reduce((max, c) => Math.max(max, c.sortOrder ?? 0), 0);
-    setForm({ ...emptyForm, parent: parentId, sortOrder: maxOrder + 1 });
+    setForm({
+      ...emptyForm,
+      parent: parentId,
+      productType: parent?.productType || 'apparel', // inherited
+      sortOrder: maxOrder + 1,
+    });
     setPreview('');
     setShowForm(true);
   }
@@ -121,6 +136,24 @@ export default function AdminCategoriesPage() {
   function closeForm() {
     setShowForm(false);
     setPreview('');
+  }
+
+  function handleParentChange(parentId) {
+    const parent = topLevel.find((c) => c._id === parentId);
+    setForm((f) => ({
+      ...f,
+      parent: parentId,
+      // choosing a parent adopts its type; clearing it keeps the current one
+      productType: parent ? (parent.productType || 'apparel') : f.productType,
+    }));
+  }
+
+  function handleTypeChange(value) {
+    setForm((f) => ({
+      ...f,
+      productType: value,
+      sizeChart: getType(value).showSizeChart ? f.sizeChart : [], // size charts are apparel-only
+    }));
   }
 
   async function handleFileChange(e) {
@@ -182,8 +215,9 @@ export default function AdminCategoriesPage() {
       ...form,
       sizes: form.sizes.split(',').map((s) => s.trim()).filter(Boolean),
       sortOrder: Number(form.sortOrder) || 0,
-      sizeChart: form.sizeChart || [],
-      parent: form.parent || null
+      sizeChart: typeInfo.showSizeChart ? (form.sizeChart || []) : [],
+      parent: form.parent || null,
+      productType: form.productType, // the API forces this to match the parent for subcategories
     };
     const url = editingId ? `/api/categories/${editingId}` : '/api/categories';
     const method = editingId ? 'PUT' : 'POST';
@@ -194,7 +228,7 @@ export default function AdminCategoriesPage() {
       setShowForm(false);
       setPreview('');
       load();
-    } else toast.error(data.error || 'Failed');
+    } else toast.error(data.error || 'Failed'); // includes "can't change product type: N products use this category"
   }
 
   async function remove(id) {
@@ -208,8 +242,7 @@ export default function AdminCategoriesPage() {
   }
 
   // Swap sortOrder with the neighboring category *within the same sibling
-  // list* (top-level categories reorder among themselves; subcategories
-  // reorder among their own siblings) and persist both.
+  // list* and persist both. Only sends sortOrder, so productType is untouched.
   async function move(list, index, direction) {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= list.length) return;
@@ -283,7 +316,7 @@ export default function AdminCategoriesPage() {
           </div>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
-          <input required placeholder="Category name (e.g. Umbrella Kurtis)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input required placeholder="Category name (e.g. Umbrella Kurtis, Smartphones, Namkeen)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input placeholder="Slug (auto if blank)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
 
           {/* Parent category — leave blank for a main/top-level category.
@@ -296,7 +329,7 @@ export default function AdminCategoriesPage() {
             <select
               className="w-full border rounded-lg px-3 py-2 text-sm"
               value={form.parent || ''}
-              onChange={(e) => setForm({ ...form, parent: e.target.value })}
+              onChange={(e) => handleParentChange(e.target.value)}
             >
               <option value="">— None (main category) —</option>
               {topLevel.filter((c) => c._id !== editingId).map((c) => (
@@ -305,40 +338,58 @@ export default function AdminCategoriesPage() {
             </select>
           </div>
 
-          <input placeholder="Available sizes, comma separated (S, M, L, XL)" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.sizes} onChange={(e) => setForm({ ...form, sizes: e.target.value })} />
+          {/* Product type — decides which fields the product forms show */}
+          <div>
+            <label className="block text-xs text-brand-ink/50 mb-1">Product type</label>
+            <CategoryTypeSelect
+              value={form.productType}
+              onChange={handleTypeChange}
+              disabled={!!form.parent}
+              className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-brand-cream disabled:cursor-not-allowed"
+            />
+          </div>
+
+          <input
+            placeholder={`${typeInfo.defaultSize ? 'Available options / pack sizes' : 'Available sizes'}, comma separated (${typeInfo.defaultSize ? '250g, 500g, 1kg' : 'S, M, L, XL'})`}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            value={form.sizes}
+            onChange={(e) => setForm({ ...form, sizes: e.target.value })}
+          />
           <textarea placeholder="Description" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
 
-          {/* Size chart — one or more images, used as the fallback on any
-              product in this category that has no size chart of its own */}
-          <div>
-            <label className="block text-xs text-brand-ink/50 mb-1">
-              Size chart images (optional — shown as a swipeable gallery on the storefront)
-            </label>
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-              {(form.sizeChart || []).map((url, idx) => (
-                <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-cream border border-brand-ink/10">
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeSizeChartImage(idx)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                disabled={sizeChartUploading}
-                onClick={() => sizeChartFileRef.current?.click()}
-                className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
-              >
-                {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
-              </button>
+          {/* Size chart — apparel only. Fallback on any product in this
+              category that has no size chart of its own. */}
+          {typeInfo.showSizeChart && (
+            <div>
+              <label className="block text-xs text-brand-ink/50 mb-1">
+                Size chart images (optional — shown as a swipeable gallery on the storefront)
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                {(form.sizeChart || []).map((url, idx) => (
+                  <div key={idx} className="relative aspect-square rounded-md overflow-hidden bg-brand-cream border border-brand-ink/10">
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeSizeChartImage(idx)}
+                      className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={sizeChartUploading}
+                  onClick={() => sizeChartFileRef.current?.click()}
+                  className="aspect-square rounded-md border-2 border-dashed border-brand-ink/20 flex flex-col items-center justify-center gap-1 text-brand-ink/40 hover:border-brand-magenta/40 disabled:opacity-50"
+                >
+                  {sizeChartUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span className="text-[10px]">{sizeChartUploading ? 'Uploading…' : 'Add'}</span>
+                </button>
+              </div>
+              <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
             </div>
-            <input ref={sizeChartFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleSizeChartFilesChange} />
-          </div>
+          )}
 
           <div>
             <label className="block text-xs text-brand-ink/50 mb-1">

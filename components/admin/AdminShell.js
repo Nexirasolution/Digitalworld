@@ -35,8 +35,9 @@ const ADMIN_NAV = [
 
 // Seller nav — scoped to their own business, under /seller/*
 const SELLER_NAV = [
-  { href: '/seller/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/seller/dashboard', label: 'Dashboard',   icon: LayoutDashboard },
   { href: '/seller/products',  label: 'My Products', icon: Package },
+  { href: '/seller/combos',    label: 'My Combos',   icon: Layers },   // ← add
   { href: '/seller/orders',    label: 'My Orders',   icon: ShoppingCart },
   { href: '/seller/settings',  label: 'Settings',    icon: SettingsIcon },
 ];

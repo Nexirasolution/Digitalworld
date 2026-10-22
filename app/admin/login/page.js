@@ -40,7 +40,7 @@ export default function AdminLoginPage() {
       <form onSubmit={submit} className="w-full max-w-[340px]">
         <div className="text-center mb-8">
           <h1 className="text-xl font-medium" style={{ color: INK }}>
-            JR Fashion
+            MailooBazar
           </h1>
           <p className="text-xs mt-1.5" style={{ color: INK_SOFT }}>Admin sign in</p>
         </div>

@@ -8,7 +8,7 @@ export default function ShopLayout({ children }) {
       <Navbar />
       <main className="min-h-screen">{children}</main>
       <Footer />
-      <WhatsAppButton phone="919344430878" />
+      <WhatsAppButton phone="917010693674" />
     </>
   );
 }

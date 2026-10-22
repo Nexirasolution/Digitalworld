@@ -75,7 +75,7 @@ export default function AdminShell({ admin, navSet = 'admin', children }) {
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${LINE}` }}>
           <div className="flex flex-col leading-tight">
             <Link href={homeHref} className="font-medium text-base" style={{ color: INK }}>
-              J
+              MailooBazar
             </Link>
             <span className="text-[10px] tracking-widest uppercase mt-0.5" style={{ color: INK_SOFT }}>
               {panelLabel}
@@ -148,7 +148,7 @@ export default function AdminShell({ admin, navSet = 'admin', children }) {
             <Menu size={22} />
           </button>
           <span className="font-medium text-base" style={{ color: INK }}>
-            JR Fashion {navSet === 'seller' ? 'Seller' : 'Admin'}
+            MailooBazar{navSet === 'seller' ? 'Seller' : 'Admin'}
           </span>
         </header>
 

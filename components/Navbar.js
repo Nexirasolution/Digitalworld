@@ -107,7 +107,7 @@ export default function Navbar() {
 
   return (
     <>
-      <CouponMarquee />
+      {/* <CouponMarquee /> */}
 
       <header className="sticky top-0 z-50" style={{ background: PAPER, borderBottom: `1px solid ${LINE}` }}>
         <div className="max-w-7xl mx-auto px-6">

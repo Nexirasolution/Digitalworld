@@ -1,5 +1,5 @@
 export default function robots() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.mohithtrends.com';
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.mailoobazar.com';
   return {
     rules: [
       { userAgent: '*', allow: '/', disallow: ['/admin', '/api'] }

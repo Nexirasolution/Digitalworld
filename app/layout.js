@@ -18,17 +18,17 @@ export async function generateMetadata() {
   } catch {
     settings = null;
   }
-  const title = settings?.seoTitle || 'SSRK Trending Collections - Women Kurtis, Nighties & More';
+  const title = settings?.seoTitle || 'MailooBazar';
   const description =
     settings?.seoDescription ||
-    'Shop authentic women kurtis, nighties, innerwear and trending collections online from SSRK Trending Collections.';
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://ssrkcollections.com';
+    'Shop authentic snacks online from MailooBazar.';
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://mailoobazar.com';
   return {
-    title: { default: title, template: '%s | SSRK Trending Collections' },
+    title: { default: title, template: '%s | MailooBazar' },
     description,
     metadataBase: new URL(siteUrl),
-    keywords: ['women kurtis online', 'nighties online', 'innerwear online', 'SSRK trending collections', 'women fashion'],
-    openGraph: { title, description, siteName: 'SSRK Trending Collections', type: 'website' },
+    keywords: ['women kurtis online', 'nighties online', 'innerwear online', 'MailooBazar', 'women fashion'],
+    openGraph: { title, description, siteName: 'MailooBazar', type: 'website' },
     icons: { icon: '/favicon.ico' },
   };
 }

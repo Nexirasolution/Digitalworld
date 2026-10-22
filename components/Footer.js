@@ -31,9 +31,9 @@ export default async function Footer() {
 
   const quickLinks = [
     { label: 'Home', href: '/' },
-    { label: 'Shop', href: '/shop' },
+    { label: 'Shop', href: '/products' },
     { label: 'Wishlist', href: '/wishlist' },
-    { label: 'Contact', href: '/contact' },
+    // { label: 'Contact', href: '/contact' },
   ];
 
   return (

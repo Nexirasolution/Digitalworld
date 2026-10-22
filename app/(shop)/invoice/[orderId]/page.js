@@ -27,7 +27,7 @@ export default async function InvoicePage({ params }) {
     return <div className="p-10 text-center text-sm" style={{ color: GREY }}>Invoice not found.</div>;
   }
 
-  const storeName = settings?.storeName || 'Tirupur Clothing Hub';
+  const storeName = settings?.storeName || 'MailooBazar';
 
   return (
     <div className="max-w-2xl mx-auto p-8 sm:p-10" style={{ background: PAPER, color: BLACK }}>
